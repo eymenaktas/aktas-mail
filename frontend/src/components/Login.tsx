@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, ApiError } from "../lib/api.js";
 import { passkeyAuthenticate, unwrapPassword, prfSupported } from "../lib/passkey.js";
 import { Logo } from "./Logo.js";
+import { ThemeToggle } from "./ThemeToggle.js";
 
 type Step = "start" | "password" | "totp" | "recovery";
 
@@ -97,7 +98,10 @@ export function Login({ onDone }: { onDone: () => void }) {
   return (
     <div className="login">
       <div className="login-card">
-        <Logo size={44} />
+        <div className="login-top">
+          <Logo size={44} />
+          <ThemeToggle />
+        </div>
         <h1>Aktaş Mail</h1>
 
         {step === "start" && (

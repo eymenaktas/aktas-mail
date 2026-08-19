@@ -619,13 +619,101 @@ kbd {
     align-items: center;
   }
 }
+/* Hamburger yalnızca dar ekranda; geniş ekranda çubuk zaten sabit */
+.menu-btn {
+  display: none;
+}
+
+.drawer-backdrop {
+  display: none;
+}
+
 @media (max-width: 760px) {
+  /*
+   * Telefon düzeni. Önceki hâlde .sidebar ve .list birlikte
+   * gizleniyordu — yani ne klasörler ne de mesaj listesi vardı,
+   * hiçbir mesaj seçilemiyordu. Artık:
+   *   liste  = ana ekran
+   *   çubuk  = hamburger ile açılan çekmece
+   *   okuyucu= mesaj seçilince tam ekran
+   */
   .app {
     grid-template-columns: 1fr;
   }
-  .sidebar,
+
+  .menu-btn {
+    display: grid;
+  }
+
+  /* Klasör çubuğu: ekran dışında bekleyen çekmece */
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(280px, 82vw);
+    z-index: 70;
+    transform: translateX(-100%);
+    transition: transform 0.26s var(--ease);
+    box-shadow: var(--shadow-2);
+    align-items: stretch;
+    padding-top: 16px;
+    /* Çentik/gesture çubuğu olan telefonlarda içerik kenara yapışmasın */
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+  .sidebar.is-open {
+    transform: none;
+  }
+  /* Dar ekranda isimler geri gelsin — 1100px kuralı onları gizliyordu */
+  .sidebar .brand span,
+  .sidebar .folder-name,
+  .sidebar .who-text {
+    display: block;
+  }
+
+  .drawer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 65;
+    border: 0;
+    background: rgba(0, 0, 0, 0.5);
+    animation: backdrop-in 0.2s var(--ease);
+  }
+  @keyframes backdrop-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
   .list {
+    border-right: 0;
+  }
+
+  /* Okuyucu: mesaj seçilene kadar yok, seçilince tam ekran */
+  .pane {
     display: none;
+  }
+  .app.is-reading .list {
+    display: none;
+  }
+  .app.is-reading .pane {
+    display: flex;
+  }
+  /* Okurken "Yaz" düğmesi okuma alanını kapatmasın */
+  .app.is-reading .compose-fab {
+    display: none;
+  }
+
+  .compose-fab {
+    right: 18px;
+    bottom: max(18px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
+  .drawer-backdrop {
+    animation: none;
   }
 }
 
@@ -783,4 +871,41 @@ kbd {
 }
 .onay-parola:focus {
   border-color: var(--accent);
+}
+
+/* ── tema düğmesi ── */
+
+/*
+ * .icon-btn içindeki SVG'ler için boyut kuralı yoktu; ölçüsüz bir SVG
+ * kendi varsayılan boyutunu alıp düğmeden taşıyordu. Mobil menü
+ * düğmesi de bundan etkileniyordu.
+ */
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.theme-btn svg {
+  transition: transform 0.45s var(--ease);
+}
+.theme-btn:hover svg {
+  transform: rotate(35deg);
+}
+
+/* Giriş ekranı: logo solda, tema düğmesi sağda */
+.login-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-btn:hover svg {
+    transform: none;
+  }
 }

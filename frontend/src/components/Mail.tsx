@@ -4,6 +4,7 @@ import { MessageView } from "./MessageView.js";
 import { Compose, type Draft } from "./Compose.js";
 import { Logo } from "./Logo.js";
 import { Settings } from "./Settings.js";
+import { ThemeToggle } from "./ThemeToggle.js";
 
 /** IMAP özel klasörlerini Türkçe adlara ve sıraya çevir. */
 const KLASOR: Record<string, { ad: string; ikon: string; sira: number }> = {
@@ -55,6 +56,11 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [ayarlar, setAyarlar] = useState(false);
   const [sonuclar, setSonuclar] = useState<MessageSummary[] | null>(null);
   const [araniyor, setAraniyor] = useState(false);
+  /**
+   * Telefonda klasör çubuğu ekrana sığmadığı için çekmeceye dönüşüyor.
+   * Geniş ekranda bu durum hiç kullanılmıyor — çubuk zaten sabit.
+   */
+  const [menuAcik, setMenuAcik] = useState(false);
 
   useEffect(() => {
     api
@@ -131,7 +137,9 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
         e.preventDefault();
         setDraft({ to: "", subject: "", text: "" });
       } else if (e.key === "Escape") {
-        setSelected(null);
+        // Çekmece açıksa önce onu kapat — Esc en üstteki katmanı kapatmalı
+        if (menuAcik) setMenuAcik(false);
+        else setSelected(null);
       } else if (e.key === "u") {
         setSelected(null);
       } else if (e.key === "r" && !loading) {
@@ -144,7 +152,7 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [yukle, loading]);
+  }, [yukle, loading, menuAcik]);
 
   async function cikis() {
     await api.logout().catch(() => {});
@@ -163,9 +171,22 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const yukleniyor = araniyor || loading;
 
   return (
-    <div className="app">
+    /**
+     * `is-reading`: telefonda okuyucu tam ekran kaplasın diye.
+     * Geniş ekranda üç panel yan yana durduğu için bu sınıfın etkisi yok.
+     */
+    <div className={`app ${selected !== null ? "is-reading" : ""}`}>
+      {/* Çekmece açıkken arka planı karart ve dışa tıklamayı yakala */}
+      {menuAcik && (
+        <button
+          className="drawer-backdrop"
+          aria-label="Menüyü kapat"
+          onClick={() => setMenuAcik(false)}
+        />
+      )}
+
       {/* ── Sol: klasörler ── */}
-      <aside className="sidebar">
+      <aside className={`sidebar ${menuAcik ? "is-open" : ""}`}>
         <div className="brand">
           <Logo size={30} />
           <span>Aktaş Mail</span>
@@ -176,7 +197,10 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <button
               key={b.path}
               className={`folder ${b.path === mailbox ? "is-active" : ""}`}
-              onClick={() => setMailbox(b.path)}
+              onClick={() => {
+                setMailbox(b.path);
+                setMenuAcik(false); // telefonda seçim sonrası çekmece kapansın
+              }}
             >
               <span className="folder-ico">{kutuIkon(b)}</span>
               <span className="folder-name">{kutuAdi(b)}</span>
@@ -206,6 +230,20 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
       {/* ── Orta: mesaj listesi ── */}
       <section className="list">
         <div className="list-bar">
+          {/* Yalnızca telefonda görünür (CSS); çekmeceyi açar */}
+          <button
+            className="icon-btn menu-btn"
+            onClick={() => setMenuAcik(true)}
+            aria-label="Klasörleri aç"
+            aria-expanded={menuAcik}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                 strokeLinecap="round" aria-hidden="true">
+              <path d="M3 6h18" />
+              <path d="M3 12h18" />
+              <path d="M3 18h18" />
+            </svg>
+          </button>
           <input
             id="ara"
             className="search"
@@ -221,6 +259,7 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
           <button className="icon-btn" onClick={yukle} title="Yenile (r)" disabled={loading}>
             ↻
           </button>
+          <ThemeToggle />
         </div>
 
         {error && <p className="empty">{error}</p>}
