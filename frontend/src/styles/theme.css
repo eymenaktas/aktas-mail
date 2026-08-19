@@ -1,0 +1,165 @@
+/*
+ * Aktaş Mail teması — Gmail paleti.
+ *
+ * Renkler Google'ın Material tonlarından: mavi #1a73e8 (koyu temada
+ * #8ab4f8), seçili öğede açık mavi dolgu, yıldız için Google sarısı,
+ * hata için Google kırmızısı. Varsayılan açık tema — Gmail öyle.
+ */
+
+:root {
+  /* Google mavisi */
+  --accent: #1a73e8;
+  --accent-hi: #1557b0;
+  --accent-dim: #d3e3fd; /* seçili klasör dolgusu */
+  --accent-on: #001d35; /* açık mavi üstündeki yazı */
+
+  --bg: #ffffff;
+  --surface: #f6f8fc; /* kenar çubuğu */
+  --surface-hi: #eaf1fb; /* hover */
+  --surface-active: #d3e3fd; /* seçili */
+  --read-bg: #f2f6fc; /* okunmuş satır */
+
+  --fg: #1f1f1f;
+  --muted: #5f6368;
+  --dim: #80868b;
+
+  --line: #e0e3e7;
+  --line-hi: #c4c7c5;
+
+  --danger: #d93025; /* Google kırmızısı */
+  --warn: #f9ab00; /* yıldız sarısı */
+
+  /* Yazma penceresi başlığı: Gmail'de her iki temada da koyu */
+  --compose-bar-bg: #404040;
+  --compose-bar-fg: #ffffff;
+
+  --shadow-1: 0 1px 2px rgba(60, 64, 67, 0.3), 0 1px 3px 1px rgba(60, 64, 67, 0.15);
+  --shadow-2: 0 2px 6px 2px rgba(60, 64, 67, 0.15), 0 1px 2px rgba(60, 64, 67, 0.3);
+
+  /* Gmail Google Sans kullanıyor; sistemde yoksa Roboto ve sistem yazı tipi */
+  --font: "Google Sans", "Product Sans", Roboto, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "Roboto Mono", SFMono-Regular, Menlo, monospace;
+
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  --sidebar-w: 256px;
+  --list-w: 400px;
+}
+
+/* Gmail koyu teması */
+:root[data-theme="dark"] {
+  --accent: #8ab4f8;
+  --accent-hi: #aecbfa;
+  --accent-dim: #004a77;
+  --accent-on: #c2e7ff;
+
+  --bg: #1f1f1f;
+  --surface: #1e1f20;
+  --surface-hi: #2d2e30;
+  --surface-active: #004a77;
+  --read-bg: #1a1a1a;
+
+  --fg: #e3e3e3;
+  --muted: #9aa0a6;
+  --dim: #80868b;
+
+  --line: #3c4043;
+  --line-hi: #5f6368;
+
+  --danger: #f28b82;
+  --warn: #fdd663;
+
+  --compose-bar-bg: #2d2e30;
+  --compose-bar-fg: #e3e3e3;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.6), 0 1px 3px 1px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 2px 6px 2px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+}
+
+input:focus,
+textarea:focus,
+button:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+a {
+  color: var(--accent);
+}
+
+::selection {
+  background: var(--accent-dim);
+  color: var(--accent-on);
+}
+
+/* Gmail'in ince, sadece hover'da beliren kaydırma çubuğu */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-hi);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

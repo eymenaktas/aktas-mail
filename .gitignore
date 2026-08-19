@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+
+# Sırlar — asla commit edilmez
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Yerel
+.DS_Store
+*.log
+.vscode/
+.idea/
