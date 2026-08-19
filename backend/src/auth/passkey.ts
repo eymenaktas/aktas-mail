@@ -102,11 +102,16 @@ export async function verifyPasskeyRegistration(params: {
     wrappedSecret: params.wrappedSecret,
   });
 
-  // Passkey kurulduysa ikinci faktör artık passkey
-  await db
-    .update(schema.users)
-    .set({ secondFactor: "passkey", updatedAt: new Date() })
-    .where(eq(schema.users.id, params.userId));
+  /**
+   * `secondFactor` BİLEREK değiştirilmiyor.
+   *
+   * Passkey ikinci faktör değil, **alternatif giriş yolu**: parolayla da
+   * passkey'le de girilebilir. Burada `secondFactor="passkey"` yazmak
+   * parola akışını ikinci faktör beklemeye sokuyor ve parolayla girişi
+   * kilitliyordu.
+   *
+   * TOTP kurulmuşsa o gerçek ikinci faktördür ve dokunulmadan kalır.
+   */
 
   return { ok: true };
 }

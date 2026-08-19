@@ -37,6 +37,13 @@ function clientIp(req: FastifyRequest): string | null {
   return req.ip || null;
 }
 
+/** Uygulama yalnızca kendi alan adının posta kutularına açık. */
+function ayniAlanAdi(email: string): boolean {
+  return email.endsWith("@" + env.MAIL_DOMAIN.toLowerCase());
+}
+
+export { ayniAlanAdi };
+
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   /**
    * 1. AŞAMA — parola.
@@ -64,6 +71,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       const email = body.data.email.toLowerCase().trim();
       const ip = clientIp(req);
 
+      // Yalnızca kendi alan adımızın kutuları. Dovecot zaten başkasını
+      // doğrulamaz, ama açıkça reddetmek daha net bir hata veriyor ve
+      // ileride başka alan adı eklenirse uygulama yanlışlıkla ona da
+      // açılmıyor.
+      if (!ayniAlanAdi(email)) {
+        await audit({ action: "login.wrong_domain", detail: email, ip });
+        return reply.code(401).send({ error: "E-posta veya parola hatalı" });
+      }
+
       // Dovecot'a bağlanabiliyorsak parola doğru
       const ok = await verifyCredentials({ user: email, pass: body.data.password });
       if (!ok) {
@@ -89,8 +105,19 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(403).send({ error: "Hesap devre dışı" });
       }
 
-      // İkinci faktör kurulu değilse doğrudan oturum aç
-      if (user.secondFactor === "none") {
+      /**
+       * Parola doğru. İkinci faktör yalnızca TOTP ya da güvenilen cihaz
+       * kurulmuşsa istenir.
+       *
+       * `passkey` burada ikinci faktör SAYILMAZ — o ayrı bir giriş yolu
+       * (parolasız). Passkey kurmak parolayla girişi kilitlememelidir;
+       * zaten kilitlese bile aynı parola Dovecot'ta doğrudan çalışıyor,
+       * yani kullanıcıyı engellerdi ama saldırganı engellemezdi.
+       */
+      const ikinciFaktorGerek =
+        user.secondFactor === "totp" || user.secondFactor === "device";
+
+      if (!ikinciFaktorGerek) {
         const { sessionId, sessionKey, refreshToken } = await issueSession({
           userId: user.id,
           deviceId: null,
@@ -102,7 +129,12 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         reply.setCookie(SESSION_COOKIE, packSessionCookie(sessionId, sessionKey), cookieBase);
         reply.setCookie(REFRESH_COOKIE, refreshToken, cookieBase);
 
-        await audit({ userId: user.id, action: "login.ok", detail: "2fa yok", ip });
+        await audit({
+          userId: user.id,
+          action: "login.ok",
+          detail: user.secondFactor === "passkey" ? "parola (passkey de kurulu)" : "parola",
+          ip,
+        });
         return reply.send({
           status: "ok",
           user: { email: user.email, displayName: user.displayName },

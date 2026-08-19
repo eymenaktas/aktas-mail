@@ -19,7 +19,7 @@ import {
 import { verifyCredentials } from "../mail/imap.js";
 import { packSessionCookie, unpackSessionCookie, newSessionKey } from "../lib/crypto.js";
 import { audit } from "../lib/audit.js";
-import { SESSION_COOKIE, REFRESH_COOKIE, cookieBase } from "./auth.js";
+import { SESSION_COOKIE, REFRESH_COOKIE, cookieBase, ayniAlanAdi } from "./auth.js";
 
 /**
  * PAROLASIZ GİRİŞ — PC ve mobilde aynı akış.
@@ -147,6 +147,13 @@ export async function passkeyRoutes(app: FastifyInstance): Promise<void> {
         .limit(1);
 
       if (!user) return reply.code(401).send({ error: "Kullanıcı bulunamadı" });
+
+      // Alan adı kontrolü burada da: passkey akışı ayrı bir uç, parola
+      // akışındaki kontrole güvenip atlamak katmanı zayıflatır.
+      if (!ayniAlanAdi(user.email)) {
+        await audit({ userId: user.id, action: "login.wrong_domain", ip: req.ip });
+        return reply.code(403).send({ error: "Bu hesap bu uygulamayı kullanamaz" });
+      }
 
       // Çözülen parola gerçekten doğru mu? Dovecot söyler.
       const ok = await verifyCredentials({ user: user.email, pass: body.data.password });
