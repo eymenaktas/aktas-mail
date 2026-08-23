@@ -1,4 +1,8 @@
-# Aktaş Mail
+<p align="center">
+  <img src="logo.svg" width="76" height="76" alt="Aktaş Mail logosu" />
+</p>
+
+<h1 align="center">Aktaş Mail</h1>
 
 `mail.akts.tr` üzerinde çalışan, kendi sunucusunda barınan e-posta uygulaması.
 Gmail benzeri arayüz, passkey ile parolasız giriş, anlık bildirim ve Türkçe
