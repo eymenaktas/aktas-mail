@@ -121,14 +121,21 @@ export interface ListeSonucu {
   messages: MessageSummary[];
   /** Bu istekte yapılan bakım (spam taşıma / eski spam temizliği) */
   bakim: BakimSonucu;
+  /** Kutudaki toplam mesaj sayısı — sayfa sayısını hesaplamak için */
+  toplam: number;
+  /** Kaçıncı sayfa (0 = en yeni) */
+  sayfa: number;
+  /** Sayfa başına mesaj */
+  limit: number;
 }
 
 export async function listMessages(
   creds: MailboxCredentials,
-  opts: { mailbox?: string; limit?: number; before?: number; userId?: number } = {},
+  opts: { mailbox?: string; limit?: number; sayfa?: number; userId?: number } = {},
 ): Promise<ListeSonucu> {
   const mailbox = opts.mailbox ?? "INBOX";
   const limit = Math.min(opts.limit ?? 30, 100);
+  const sayfa = Math.max(0, Math.trunc(opts.sayfa ?? 0));
 
   const client = await connect(creds);
   try {
@@ -145,11 +152,31 @@ export async function listMessages(
     const lock = await client.getMailboxLock(mailbox);
     try {
       const status = client.mailbox;
-      if (!status || status.exists === 0) return { messages: [], bakim };
+      if (!status || status.exists === 0) {
+        return { messages: [], bakim, toplam: 0, sayfa: 0, limit };
+      }
 
-      // En yeni `limit` mesaj
-      const start = Math.max(1, status.exists - limit + 1);
-      const range = `${start}:*`;
+      /*
+        SAYFALAMA — sıra numarası (sequence) üzerinden.
+
+        Kutudaki mesajlar 1..exists diye sıralı ve en YENİ en sonda.
+        Sayfa 0 en yeni `limit` taneyi, sayfa 1 ondan önceki `limit`
+        taneyi veriyor:
+
+            son  = exists - sayfa*limit      (bu sayfanın en yenisi)
+            ilk  = son - limit + 1
+
+        UID yerine sıra numarası kullanılıyor çünkü UID'ler boşluklu
+        olabiliyor (silinen mailler); sıra numarası her zaman bitişik.
+        Karşılığında sayfa sınırları listeleme sırasında mail
+        silinirse kayabilir — kabul edilebilir, alternatifi her sayfa
+        için tüm UID listesini çekmek.
+      */
+      const toplam = status.exists;
+      const son = toplam - sayfa * limit;
+      if (son < 1) return { messages: [], bakim, toplam, sayfa, limit };
+      const start = Math.max(1, son - limit + 1);
+      const range = `${start}:${son}`;
 
       const out: MessageSummary[] = [];
       for await (const msg of client.fetch(range, {
@@ -182,7 +209,8 @@ export async function listMessages(
       }
 
       await spamIsaretle(out);
-      return { messages: out.reverse(), bakim }; // en yeni üstte
+      // en yeni üstte
+      return { messages: out.reverse(), bakim, toplam, sayfa, limit };
     } finally {
       lock.release();
     }
@@ -571,6 +599,99 @@ export async function ozelKutuBul(
  * kaydetmek tek başına yetmiyordu, mail bulunduğu klasörde kalıyordu.
  * Kullanıcının beklediği şey mailin GİTMESİ.
  */
+/**
+ * Bir klasörü boşaltır: içindeki HER ŞEYİ Çöp'e taşır.
+ *
+ * Kalıcı SİLMİYOR — Çöp'e taşıyor. Sebep: model yanılıp meşru bir maili
+ * Spam'e atmış olabilir ve "boşalt" düğmesi tek tıkla geri dönülemez
+ * bir kayba yol açmamalı. Çöp'ten geri alınabiliyor; oradaki mailleri
+ * zaten mevcut bakım süresi dolunca temizliyor.
+ */
+export async function kutuyuBosalt(
+  creds: MailboxCredentials,
+  kaynak: string,
+  hedef: string,
+): Promise<{ tasinan: number }> {
+  if (kaynak === hedef) return { tasinan: 0 };
+  const client = await connect(creds);
+  try {
+    const lock = await client.getMailboxLock(kaynak);
+    try {
+      const durum = client.mailbox;
+      const adet = durum && typeof durum === "object" ? durum.exists : 0;
+      if (!adet) return { tasinan: 0 };
+      // `1:*` sıra numarası aralığı — kutudaki her mesaj.
+      await client.messageMove("1:*", hedef);
+      return { tasinan: adet };
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout().catch(() => {});
+  }
+}
+
+/**
+ * Birden çok maili tek seferde taşır.
+ *
+ * Tek tek `mesajiTasi` çağırmak her mail için ayrı IMAP bağlantısı
+ * açardı; 50 mail seçildiğinde 50 bağlantı demek. Burada tek bağlantı,
+ * tek `messageMove` var.
+ */
+/** Verilen uid'ler için konu + önizleme — toplu etiketleme kullanıyor. */
+export async function ozetleriGetir(
+  creds: MailboxCredentials,
+  mailbox: string,
+  uidler: number[],
+): Promise<Array<{ uid: number; subject: string; preview: string; from: string | null }>> {
+  if (uidler.length === 0) return [];
+  const client = await connect(creds);
+  try {
+    const lock = await client.getMailboxLock(mailbox);
+    try {
+      const cikti: Array<{ uid: number; subject: string; preview: string; from: string | null }> = [];
+      for await (const msg of client.fetch(
+        { uid: uidler.join(",") },
+        { uid: true, envelope: true, bodyStructure: true, bodyParts: ["1", "1.1"] },
+        { uid: true },
+      )) {
+        cikti.push({
+          uid: msg.uid,
+          subject: msg.envelope?.subject ?? "",
+          preview: buildPreview(msg.bodyParts, msg.bodyStructure),
+          from: msg.envelope?.from?.[0]?.address ?? null,
+        });
+      }
+      return cikti;
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout().catch(() => {});
+  }
+}
+
+export async function mesajlariTasi(
+  creds: MailboxCredentials,
+  uidler: number[],
+  kaynak: string,
+  hedef: string,
+): Promise<{ tasinan: number }> {
+  if (uidler.length === 0 || kaynak === hedef) return { tasinan: 0 };
+  const client = await connect(creds);
+  try {
+    const lock = await client.getMailboxLock(kaynak);
+    try {
+      await client.messageMove({ uid: uidler.join(",") }, hedef, { uid: true });
+      return { tasinan: uidler.length };
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout().catch(() => {});
+  }
+}
+
 export async function mesajiTasi(
   creds: MailboxCredentials,
   uid: number,

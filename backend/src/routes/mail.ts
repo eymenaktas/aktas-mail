@@ -10,11 +10,60 @@ import {
   searchMessages,
   tumunuOkunduYap,
   okunmamisSayilari,
+  kutuyuBosalt,
+  mesajlariTasi,
+  ozelKutuBul,
+  ozetleriGetir,
 } from "../mail/imap.js";
+import { db } from "../db/index.js";
+import { spamLabels } from "../db/schema.js";
+import { spamSkorla } from "../mail/spam.js";
 import { sendMail } from "../mail/send.js";
 import { audit } from "../lib/audit.js";
 import { avatarlariGetir } from "../mail/avatar-cache.js";
 import { SESSION_COOKIE } from "./auth.js";
+
+/**
+ * Seçilen mailleri toplu olarak spam/ham diye kaydeder.
+ *
+ * Tek tek "Spam" düğmesiyle aynı tabloya yazıyor (`spam_labels`), yalnızca
+ * `kaynak` alanı "toplu" — sonraki eğitimde tek tek verilen sinyalden
+ * ayırt edilebilsin diye.
+ */
+async function topluEtiketle(
+  kimlik: { user: string; pass: string },
+  userId: number,
+  mailbox: string,
+  uidler: number[],
+  label: "spam" | "ham",
+): Promise<void> {
+  const ozetler = await ozetleriGetir(kimlik, mailbox, uidler);
+  if (ozetler.length === 0) return;
+
+  const skorlar = await spamSkorla(
+    ozetler.map((o) => `${o.subject} ${o.preview}`.trim().slice(0, 4000)),
+  );
+
+  await db
+    .insert(spamLabels)
+    .values(
+      ozetler.map((o, i) => ({
+        userId,
+        label,
+        kaynak: "toplu",
+        subject: o.subject.slice(0, 500),
+        body: o.preview.slice(0, 4000),
+        fromAddress: o.from,
+        modelSkoru: skorlar[i]?.skor ?? null,
+        modelDili: skorlar[i]?.model ?? null,
+        messageKey: `${mailbox}:${o.uid}`,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [spamLabels.userId, spamLabels.messageKey],
+      set: { label, kaynak: "toplu", createdAt: new Date() },
+    });
+}
 
 /** Oturumu çözer; yoksa 401. Her posta rotasının ilk adımı. */
 async function requireSession(req: FastifyRequest, reply: FastifyReply) {
@@ -53,6 +102,7 @@ export async function mailRoutes(app: FastifyInstance): Promise<void> {
       .object({
         mailbox: z.string().max(255).default("INBOX"),
         limit: z.coerce.number().int().min(1).max(100).default(30),
+        sayfa: z.coerce.number().int().min(0).max(10000).default(0),
       })
       .safeParse(req.query);
 
@@ -60,11 +110,23 @@ export async function mailRoutes(app: FastifyInstance): Promise<void> {
 
     const sonuc = await listMessages(
       { user: session.email, pass: session.imapPassword },
-      { mailbox: query.data.mailbox, limit: query.data.limit, userId: session.userId },
+      {
+        mailbox: query.data.mailbox,
+        limit: query.data.limit,
+        sayfa: query.data.sayfa,
+        userId: session.userId,
+      },
     );
     // `bakim`: bu istekte spam'e taşınan / Çöp'e temizlenen sayıları.
     // Arayüz bunu kısa bir bilgi olarak gösteriyor.
-    return reply.send({ messages: sonuc.messages, bakim: sonuc.bakim });
+    // `toplam/sayfa/limit`: sayfalama denetimleri için.
+    return reply.send({
+      messages: sonuc.messages,
+      bakim: sonuc.bakim,
+      toplam: sonuc.toplam,
+      sayfa: sonuc.sayfa,
+      limit: sonuc.limit,
+    });
   });
 
   /**
@@ -281,5 +343,76 @@ export async function mailRoutes(app: FastifyInstance): Promise<void> {
       pass: session.imapPassword,
     });
     return reply.send({ counts: sayilar });
+  });
+
+  /**
+   * Seçilen mailleri toplu taşı — Çöp'e atmak dahil.
+   *
+   * `tumu: true` verilirse klasörün TAMAMI taşınıyor; "Spam'i boşalt"
+   * düğmesi de bunu kullanıyor. Ayrı bir "boşalt" ucu yazılmıştı,
+   * kaldırıldı: aynı işi iki yerde yapmak, ikisinin zamanla ayrışması
+   * demek (bugün avatar zincirinde tam olarak bu oldu).
+   *
+   * KALICI SİLME YOK — her şey Çöp'e taşınıyor, geri alınabiliyor.
+   */
+  app.post("/api/messages/bulk-move", async (req, reply) => {
+    const session = await requireSession(req, reply);
+    if (!session) return;
+
+    const govde = z
+      .object({
+        uids: z.array(z.number().int().positive()).max(500).default([]),
+        mailbox: z.string().min(1).max(255),
+        hedef: z.enum(["cop", "spam", "gelen"]),
+        tumu: z.boolean().default(false),
+      })
+      .safeParse(req.body);
+    if (!govde.success) return reply.code(400).send({ error: "Geçersiz istek" });
+
+    const kimlik = { user: session.email, pass: session.imapPassword };
+    const hedefYol =
+      govde.data.hedef === "cop"
+        ? await ozelKutuBul(kimlik, "\\Trash", ["Trash", "Çöp", "Deleted Messages"])
+        : govde.data.hedef === "spam"
+          ? await ozelKutuBul(kimlik, "\\Junk", ["Junk", "Spam"])
+          : "INBOX";
+    if (!hedefYol) return reply.code(400).send({ error: "Hedef klasör bulunamadı" });
+
+    if (!govde.data.tumu && govde.data.uids.length === 0) {
+      return reply.code(400).send({ error: "Seçim boş" });
+    }
+
+    /*
+      SPAM/HAM işaretlemesi modele de yazılıyor.
+
+      Yalnızca taşımak, kullanıcının verdiği bilgiyi çöpe atmak olurdu:
+      tek tek "Spam" düğmesi zaten `spam_labels`a yazıyor, toplu seçim
+      de yazmalı. Konu ve önizleme taşımadan ÖNCE okunuyor (sonra mail
+      o klasörde olmuyor).
+
+      `tumu` seçildiğinde etiket yazılmıyor: binlerce satır eklemek
+      eğitim verisini bir klasörün tamamıyla doldurur ve kullanıcının
+      tek tek verdiği asıl sinyali bastırırdı.
+    */
+    if (!govde.data.tumu && (govde.data.hedef === "spam" || govde.data.hedef === "gelen")) {
+      await topluEtiketle(
+        kimlik,
+        session.userId,
+        govde.data.mailbox,
+        govde.data.uids,
+        govde.data.hedef === "spam" ? "spam" : "ham",
+      ).catch(() => {}); // etiket yazılamazsa taşıma yine yapılsın
+    }
+
+    const sonuc = govde.data.tumu
+      ? await kutuyuBosalt(kimlik, govde.data.mailbox, hedefYol)
+      : await mesajlariTasi(kimlik, govde.data.uids, govde.data.mailbox, hedefYol);
+    await audit({
+      userId: session.userId,
+      action: "mail.bulk_move",
+      detail: `${sonuc.tasinan} mail ${govde.data.mailbox} -> ${hedefYol}`,
+      ip: req.ip,
+    });
+    return reply.send({ ...sonuc, hedef: hedefYol });
   });
 }

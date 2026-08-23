@@ -297,10 +297,33 @@ export const api = {
       body: JSON.stringify({ mailbox }),
     }),
 
-  messages: (mailbox = "INBOX", limit = 30) =>
-    request<{ messages: MessageSummary[]; bakim: Bakim }>(
-      `/api/messages?mailbox=${encodeURIComponent(mailbox)}&limit=${limit}`,
+  messages: (mailbox = "INBOX", limit = 30, sayfa = 0) =>
+    request<{
+      messages: MessageSummary[];
+      bakim: Bakim;
+      /** Kutudaki toplam mesaj — sayfa sayısı bundan hesaplanıyor */
+      toplam: number;
+      sayfa: number;
+      limit: number;
+    }>(
+      `/api/messages?mailbox=${encodeURIComponent(mailbox)}` +
+        `&limit=${limit}&sayfa=${sayfa}`,
     ),
+
+  /**
+   * Seçilen mailleri toplu taşı. `tumu` verilirse klasörün tamamı.
+   * Kalıcı silme yok — hedef "cop" bile olsa Çöp'e taşınıyor.
+   */
+  topluTasi: (
+    mailbox: string,
+    hedef: "cop" | "spam" | "gelen",
+    uids: number[],
+    tumu = false,
+  ) =>
+    request<{ tasinan: number; hedef: string }>("/api/messages/bulk-move", {
+      method: "POST",
+      body: JSON.stringify({ mailbox, hedef, uids, tumu }),
+    }),
 
   /** Bir maili spam / spam değil diye işaretle — model eğitimi için veri */
   spamLabel: (uid: number, mailbox: string, label: "spam" | "ham") =>

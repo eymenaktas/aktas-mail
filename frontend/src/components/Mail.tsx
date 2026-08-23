@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { api, type Me, type Mailbox, type MessageSummary, type MessageDetail, type SenderAvatar, type Bakim } from "../lib/api.js";
 import { Avatar } from "./Avatar.js";
 import { PROFIL_DEGISTI } from "./ProfilePhoto.js";
@@ -46,10 +46,25 @@ function tarih(iso: string | null): string {
   return d.toLocaleDateString("tr-TR", { year: "numeric", month: "short" });
 }
 
+/**
+ * Sayfa başına mesaj.
+ *
+ * 50'de kaldı: liste zaten kendi içinde kayıyor ve daha büyük sayfa
+ * ilk açılışı yavaşlatıyor (her mesaj için gövde parçası çekiliyor).
+ */
+const SAYFA_BOYU = 50;
+
 export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [boxes, setBoxes] = useState<Mailbox[]>([]);
   const [mailbox, setMailbox] = useState("INBOX");
   const [messages, setMessages] = useState<MessageSummary[]>([]);
+  const [sayfa, setSayfa] = useState(0);
+  const [toplam, setToplam] = useState(0);
+  /** Seçim kipi: boş küme = kip kapalı. */
+  const [secili, setSecili] = useState<Set<number>>(new Set());
+  /** "Klasördeki TÜM mailler" seçildi mi (sayfadakiler değil). */
+  const [tumuSecili, setTumuSecili] = useState(false);
+  const [tasiniyor, setTasiniyor] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -188,21 +203,28 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
     setError(null);
     sayaclariTazele();
     api
-      .messages(mailbox, 50)
+      .messages(mailbox, SAYFA_BOYU, sayfa)
       .then((r) => {
         setMessages(r.messages);
+        setToplam(r.toplam);
         // Bakım bir şey yaptıysa kısa bir bilgi göster, yoksa sessiz kal
         setBakim(r.bakim && (r.bakim.tasinan || r.bakim.temizlenen) ? r.bakim : null);
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [mailbox, sayaclariTazele]);
+  }, [mailbox, sayfa, sayaclariTazele]);
 
   useEffect(() => {
     setSelected(null);
     setQuery("");
     yukle();
   }, [yukle]);
+
+  // Klasör değişince ilk sayfaya dön — yoksa 5. sayfadayken başka
+  // klasöre geçildiğinde boş liste görünüyor.
+  useEffect(() => {
+    setSayfa(0);
+  }, [mailbox]);
 
   // Canlı akıştan haber gelince listeyi tazele. Seçili mail ve arama
   // korunuyor — kullanıcının yaptığı iş bölünmesin.
@@ -319,6 +341,137 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
   }
 
   const gosterilen = sonuclar ?? messages;
+  const secimKipi = secili.size > 0 || tumuSecili;
+
+  /** Spam klasörünün yolu — "boşalt" düğmesi yalnızca orada çıksın. */
+  const spamKutusu =
+    boxes.find((b) => b.specialUse === "\\Junk")?.path ??
+    boxes.find((b) => ["junk", "spam"].includes(b.path.toLowerCase()))?.path ??
+    null;
+
+  const secimiBirak = useCallback(() => {
+    setSecili(new Set());
+    setTumuSecili(false);
+  }, []);
+
+  const secimiCevir = useCallback((uid: number) => {
+    setTumuSecili(false);
+    setSecili((onceki) => {
+      const yeni = new Set(onceki);
+      if (yeni.has(uid)) yeni.delete(uid);
+      else yeni.add(uid);
+      return yeni;
+    });
+  }, []);
+
+  /*
+    UZUN BASMA ile seçim.
+
+    `pointerdown` ile 450 ms sayaç başlıyor; parmak/fare kalkmadan
+    dolarsa seçim kipine giriliyor. Kalkarsa ya da parmak kayarsa
+    iptal — yoksa listede kaydırırken yanlışlıkla seçim başlıyor.
+
+    Masaüstünde de çalışıyor (fare basılı tutmak), ayrıca satırdaki
+    onay kutusuyla tek tıkla seçilebiliyor.
+  */
+  const basmaSayaci = useRef<number | null>(null);
+  const basmaKaydi = useRef(false);
+
+  const basmaBasla = useCallback(
+    (uid: number) => {
+      basmaKaydi.current = false;
+      basmaSayaci.current = window.setTimeout(() => {
+        basmaKaydi.current = true;
+        secimiCevir(uid);
+        // Kısa bir dokunsal geri bildirim — destekleyen cihazlarda
+        navigator.vibrate?.(12);
+      }, 450);
+    },
+    [secimiCevir],
+  );
+
+  const basmaBitir = useCallback(() => {
+    if (basmaSayaci.current !== null) {
+      clearTimeout(basmaSayaci.current);
+      basmaSayaci.current = null;
+    }
+  }, []);
+
+  /** Bu sayfadaki tüm mailleri seç. */
+  const sayfayiSec = useCallback(() => {
+    setTumuSecili(false);
+    setSecili(new Set(gosterilen.map((m) => m.uid)));
+  }, [gosterilen]);
+
+  /** Spam klasörünü boşalt — Çöp'e taşıyor, kalıcı silmiyor. */
+  const spamiBosalt = useCallback(async () => {
+    if (!spamKutusu || tasiniyor) return;
+    if (
+      !window.confirm(
+        `Spam klasöründeki ${toplam.toLocaleString("tr-TR")} mail Çöp'e taşınsın mı?\n` +
+          `Kalıcı silinmiyor, Çöp'ten geri alabilirsin.`,
+      )
+    )
+      return;
+    setTasiniyor(true);
+    try {
+      const r = await api.topluTasi(spamKutusu, "cop", [], true);
+      setBilgi(`${r.tasinan} mail Çöp'e taşındı.`);
+      setSelected(null);
+      yukle();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setTasiniyor(false);
+    }
+  }, [spamKutusu, toplam, tasiniyor, yukle]);
+
+  /** Seçilenleri spam / spam değil diye işaretle (taşır + modele yazar). */
+  const secilenleriIsaretle = useCallback(
+    async (hedef: "spam" | "gelen") => {
+      if (tasiniyor || secili.size === 0) return;
+      setTasiniyor(true);
+      try {
+        const r = await api.topluTasi(mailbox, hedef, [...secili], false);
+        setBilgi(
+          hedef === "spam"
+            ? `${r.tasinan} mail Spam'e taşındı ve model öğrendi.`
+            : `${r.tasinan} mail gelen kutusuna döndü ve model öğrendi.`,
+        );
+        secimiBirak();
+        setSelected(null);
+        yukle();
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setTasiniyor(false);
+      }
+    },
+    [mailbox, secili, tasiniyor, secimiBirak, yukle],
+  );
+
+  /** Seçilenleri (ya da tüm klasörü) Çöp'e taşı. */
+  const secilenleriSil = useCallback(async () => {
+    if (tasiniyor) return;
+    const adet = tumuSecili ? toplam : secili.size;
+    const soru = tumuSecili
+      ? `${mailbox} klasöründeki ${adet.toLocaleString("tr-TR")} mailin TAMAMI Çöp'e taşınsın mı?`
+      : `${adet} mail Çöp'e taşınsın mı?`;
+    if (!window.confirm(soru)) return;
+
+    setTasiniyor(true);
+    try {
+      const r = await api.topluTasi(mailbox, "cop", [...secili], tumuSecili);
+      setBilgi(`${r.tasinan} mail Çöp'e taşındı.`);
+      secimiBirak();
+      setSelected(null);
+      yukle();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setTasiniyor(false);
+    }
+  }, [mailbox, secili, tumuSecili, toplam, tasiniyor, secimiBirak, yukle]);
 
   /**
    * Avatarları listeden AYRI çekiyoruz.
@@ -468,6 +621,20 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
             ↻
           </button>
 
+          {/* Spam'i boşalt — yalnızca Spam klasöründe ve doluyken.
+              Kalıcı silmiyor, Çöp'e taşıyor. */}
+          {spamKutusu && mailbox === spamKutusu && toplam > 0 && (
+            <button
+              className="icon-btn"
+              onClick={() => void spamiBosalt()}
+              disabled={tasiniyor}
+              title="Spam'i boşalt (Çöp'e taşır)"
+              aria-label="Spam'i boşalt"
+            >
+              🗑
+            </button>
+          )}
+
           {/* Okunmamış varsa göster; hepsi okunmuşsa düğme gereksiz yer kaplar */}
           {gosterilen.some((m) => !m.seen) && (
             <button
@@ -515,13 +682,102 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
           </p>
         )}
 
+        {/*
+          SEÇİM ÇUBUĞU — yalnızca seçim kipindeyken.
+
+          Üç seçenek: sayfadakilerin tamamı, klasörün tamamı, ve silme.
+          "Klasörün tamamı" ayrı tutuluyor çünkü sunucuya farklı gidiyor
+          (uid listesi değil, `tumu` bayrağı) — 20 bin maili uid uid
+          göndermek anlamsız olurdu.
+        */}
+        {secimKipi && (
+          <div className="secim-bar">
+            <span className="secim-sayi">
+              {tumuSecili
+                ? `${toplam.toLocaleString("tr-TR")} mail (tüm klasör)`
+                : `${secili.size} seçili`}
+            </span>
+            <div className="secim-eylem">
+              {!tumuSecili && secili.size < gosterilen.length && (
+                <button className="btn" onClick={sayfayiSec}>
+                  Sayfayı seç
+                </button>
+              )}
+              {!tumuSecili && toplam > gosterilen.length && (
+                <button className="btn" onClick={() => setTumuSecili(true)}>
+                  Tümü ({toplam.toLocaleString("tr-TR")})
+                </button>
+              )}
+              {/* Spam işaretleme yalnızca tekil seçimde: `tumu` ile
+                  binlerce satır eğitim verisine yazılmıyor. */}
+              {!tumuSecili && spamKutusu && mailbox !== spamKutusu && (
+                <button
+                  className="btn"
+                  onClick={() => void secilenleriIsaretle("spam")}
+                  disabled={tasiniyor}
+                >
+                  Spam
+                </button>
+              )}
+              {!tumuSecili && spamKutusu && mailbox === spamKutusu && (
+                <button
+                  className="btn"
+                  onClick={() => void secilenleriIsaretle("gelen")}
+                  disabled={tasiniyor}
+                >
+                  Spam değil
+                </button>
+              )}
+              <button
+                className="btn btn-tehlike"
+                onClick={() => void secilenleriSil()}
+                disabled={tasiniyor}
+              >
+                {tasiniyor ? "Taşınıyor…" : "Çöp'e taşı"}
+              </button>
+              <button className="btn" onClick={secimiBirak}>
+                Vazgeç
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="rows">
           {gosterilen.map((m) => (
             <button
               key={m.uid}
-              className={`row ${m.seen ? "" : "is-unread"} ${selected === m.uid ? "is-selected" : ""}`}
-              onClick={() => setSelected(m.uid)}
+              className={
+                `row ${m.seen ? "" : "is-unread"} ` +
+                `${selected === m.uid ? "is-selected" : ""} ` +
+                `${secili.has(m.uid) || tumuSecili ? "is-secili" : ""}`
+              }
+              onPointerDown={() => basmaBasla(m.uid)}
+              onPointerUp={basmaBitir}
+              onPointerLeave={basmaBitir}
+              onPointerCancel={basmaBitir}
+              onContextMenu={(e) => {
+                // Masaüstünde sağ tık da seçsin; tarayıcı menüsü çıkmasın
+                e.preventDefault();
+                secimiCevir(m.uid);
+              }}
+              onClick={() => {
+                // Uzun basma seçim yaptıysa aynı olayda mail açılmasın
+                if (basmaKaydi.current) {
+                  basmaKaydi.current = false;
+                  return;
+                }
+                if (secimKipi) secimiCevir(m.uid);
+                else setSelected(m.uid);
+              }}
             >
+              {secimKipi && (
+                <span
+                  className={`row-secim ${secili.has(m.uid) || tumuSecili ? "is-isaretli" : ""}`}
+                  aria-hidden="true"
+                >
+                  ✓
+                </span>
+              )}
               <Avatar
                 name={m.from?.name ?? ""}
                 address={m.from?.address ?? ""}
@@ -563,7 +819,39 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
               </div>
             </button>
           ))}
+
+        {/*
+          SAYFALAMA — yalnızca aramada değilken.
+
+          Arama sunucu tarafında tüm kutuyu tarıyor ve kendi sonuç
+          kümesini döndürüyor; onu sayfalara bölmek yanıltıcı olurdu.
+        */}
+        {sonuclar === null && toplam > SAYFA_BOYU && (
+          <div className="sayfalama">
+            <button
+              className="btn sayfa-btn"
+              disabled={sayfa === 0 || loading}
+              onClick={() => setSayfa((s) => Math.max(0, s - 1))}
+              aria-label="Daha yeni mesajlar"
+            >
+              ‹ Yeni
+            </button>
+            <span className="sayfa-bilgi">
+              {sayfa * SAYFA_BOYU + 1}–{Math.min((sayfa + 1) * SAYFA_BOYU, toplam)}
+              <span className="sayfa-toplam"> / {toplam.toLocaleString("tr-TR")}</span>
+            </span>
+            <button
+              className="btn sayfa-btn"
+              disabled={(sayfa + 1) * SAYFA_BOYU >= toplam || loading}
+              onClick={() => setSayfa((s) => s + 1)}
+              aria-label="Daha eski mesajlar"
+            >
+              Eski ›
+            </button>
+          </div>
+        )}
         </div>
+
       </section>
 
       {/* ── Sağ: okuyucu ── */}
