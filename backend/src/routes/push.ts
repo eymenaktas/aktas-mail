@@ -9,6 +9,8 @@ import { unpackSessionCookie } from "../lib/crypto.js";
 import { loadSession } from "../auth/session.js";
 import { audit } from "../lib/audit.js";
 import { spamSkorla, SPAM_ESIGI } from "../mail/spam.js";
+import { tasimaEsigi } from "../mail/bakim.js";
+import { avatarGetir } from "../mail/avatar-cache.js";
 import { SESSION_COOKIE } from "./auth.js";
 import { yayinla } from "./events.js";
 
@@ -308,10 +310,40 @@ export async function pushRoutes(app: FastifyInstance): Promise<void> {
      * kullanıcının maili başka klasörde araması. Ucuz hatada daha
      * atak, pahalı hatada daha temkinli davranıyoruz.
      */
-    if ((skor?.skor ?? 0) > SPAM_ESIGI) {
+    /**
+     * TAŞIMA KARARI BURADA VERİLİYOR — mail geldiği ANDA.
+     *
+     * Eskiden taşıma yalnızca kullanıcı gelen kutusunu açtığında
+     * (`bakimYap`) yapılabiliyordu, çünkü sunucu IMAP parolasını
+     * saklamıyor. Ama bu kancayı çağıran İZLEYİCİ maildir dosyasına
+     * doğrudan erişiyor — taşıma bir DOSYA işlemi, IMAP gerekmiyor.
+     *
+     * Karar burada veriliyor (model ve eşikler burada), taşımayı
+     * izleyici yapıyor. Böylece spam kullanıcı hiçbir şey yapmadan,
+     * geldiği saniye Spam klasörüne gidiyor.
+     *
+     * Doğrulanmış gönderen (BIMI/VMC ya da DMARC zorlaması) asla
+     * taşınmıyor — `bakimYap`'taki güvenceyle aynı.
+     */
+    const puan = skor?.skor ?? 0;
+    const dil = skor?.model ?? "tr";
+    let tasi = puan >= tasimaEsigi(dil);
+    if (tasi) {
+      // İzleyici adresi ayrı gönderiyor; `gonderen` yalnızca görünen ad.
+      const adres = (metin(g["fromAddress"]) ?? gonderen.match(/<([^>]+)>/)?.[1] ?? "").trim();
+      const avatar = adres.includes("@")
+        ? await avatarGetir(adres).catch(() => null)
+        : null;
+      if (avatar?.verified) tasi = false;
+    }
+
+    if (puan > SPAM_ESIGI) {
       return reply.send({
-        atlandi: `spam %${Math.round((skor?.skor ?? 0) * 100)}`,
+        atlandi: `spam %${Math.round(puan * 100)}`,
         acikSekme,
+        tasi,
+        skor: puan,
+        dil,
       });
     }
 
@@ -320,6 +352,6 @@ export async function pushRoutes(app: FastifyInstance): Promise<void> {
       govde: konu,
       url: "/",
     });
-    return reply.send({ ...sonuc, acikSekme });
+    return reply.send({ ...sonuc, acikSekme, tasi: false, skor: puan, dil });
   });
 }

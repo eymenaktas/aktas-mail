@@ -185,6 +185,12 @@ export async function bimiCoz(domain: string): Promise<AvatarSonucu | null> {
  * Asıl ayrım `p=none` ile olan: o yalnızca rapor toplar, hiçbir
  * koruma vermez ve tik almaz (gmail.com böyle).
  */
+export async function dmarcCoz(domain: string): Promise<AvatarSonucu> {
+  return (await dmarcZorluyorMu(domain))
+    ? { image: null, verified: true, source: "dmarc" }
+    : { image: null, verified: false, source: "none" };
+}
+
 async function dmarcZorluyorMu(domain: string): Promise<boolean> {
   // BIMI'deki gibi kuruluş domainine kadar geri çekil
   for (const aday of bimiAdaylari(domain)) {

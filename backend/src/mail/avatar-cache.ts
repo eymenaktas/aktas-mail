@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { senderAvatars } from "../db/schema.js";
-import { bimiCoz, gravatarCoz, domainAyikla, type AvatarSonucu } from "./avatar.js";
+import { bimiCoz, gravatarCoz, dmarcCoz, domainAyikla, type AvatarSonucu } from "./avatar.js";
 
 export { domainAyikla };
 
@@ -79,22 +79,41 @@ function coz(anahtar: string, uret: () => Promise<AvatarSonucu>): Promise<Avatar
   return bekleyen;
 }
 
+/**
+ * Sıra `avatar.ts`'deki `avatarCoz` ile AYNI olmak zorunda.
+ *
+ * 2026-08-24'te ayrışmışlardı: burada yalnızca BIMI ve Gravatar vardı,
+ * DMARC katmanı hiç çağrılmıyordu. Sonuç: mavi tikin DMARC kolu
+ * üretimde ÖLÜYDÜ — github.com ve google.com hiçbir zaman tik almadı,
+ * oysa `avatarCoz` ikisine de veriyordu. Aynı zincirin iki yerde ayrı
+ * yazılması bu yüzden riskli; buraya bir katman eklerken ötekine de ekle.
+ */
 export async function avatarGetir(adres: string): Promise<AvatarSonucu> {
   const temiz = adres.trim().toLowerCase();
   const domain = domainAyikla(temiz);
   if (!domain) return BULUNAMADI;
 
-  // 1) BIMI — kurumsal ve doğrulanmış. Bir domain BIMI yayınlıyorsa o kazanır.
+  // 1) BIMI — kurumsal ve DOĞRULANMIŞ. Bir domain BIMI yayınlıyorsa o kazanır.
   const bimi =
     (await onbellektenOku(domain)) ??
     (await coz(domain, async () => (await bimiCoz(domain)) ?? BULUNAMADI));
   if (bimi.image) return bimi;
 
-  // 2) Gravatar — kişisel, doğrulanmamış.
-  return (
+  // 2) DMARC — domain başına, tik için. Fotoğraf vermiyor ama
+  //    "bu domain taklit edilemiyor" diyor.
+  const dmarcAnahtar = `dmarc:${domain}`;
+  const dmarc =
+    (await onbellektenOku(dmarcAnahtar)) ??
+    (await coz(dmarcAnahtar, () => dmarcCoz(domain)));
+
+  // 3) Gravatar — kişisel fotoğraf. Kendisi doğrulama sağlamıyor;
+  //    tik yalnızca DMARC'tan geliyor.
+  const gravatar =
     (await onbellektenOku(temiz)) ??
-    (await coz(temiz, async () => (await gravatarCoz(temiz)) ?? BULUNAMADI))
-  );
+    (await coz(temiz, async () => (await gravatarCoz(temiz)) ?? BULUNAMADI));
+
+  if (gravatar.image) return { ...gravatar, verified: dmarc.verified };
+  return dmarc.verified ? dmarc : gravatar;
 }
 
 /** Bir liste için adresleri tekilleştirip toplu çözer. */

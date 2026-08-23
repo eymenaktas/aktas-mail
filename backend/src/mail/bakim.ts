@@ -75,7 +75,7 @@ const TASIMA_ESIGI = Number(process.env["SPAM_TASIMA_ESIGI"] ?? 0.7);
 const TASIMA_ESIGI_EN = Number(process.env["SPAM_TASIMA_ESIGI_EN"] ?? 0.9);
 
 /** Mailin diline göre taşıma eşiği. */
-function tasimaEsigi(dil: "tr" | "en"): number {
+export function tasimaEsigi(dil: "tr" | "en"): number {
   return dil === "en" ? TASIMA_ESIGI_EN : TASIMA_ESIGI;
 }
 

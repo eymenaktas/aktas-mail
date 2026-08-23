@@ -21,6 +21,23 @@
  * tetikleme buraya taşındı: Dovecot'un yapılandırmasına hiç dokunmuyor,
  * yalnızca sonucu (dosya) izliyor.
  *
+ * ## Spam taşıma
+ *
+ * Kanca yalnızca "bildirim gönderilsin mi" demiyor, "bu mail Spam'e
+ * taşınsın mı" da diyor (`tasi`). Taşımayı BU betik yapıyor çünkü
+ * dosyaya doğrudan erişimi var.
+ *
+ * Neden burada: uygulama IMAP parolasını saklamadığı için posta
+ * kutusunu kendi başına değiştiremiyor ve taşıma ancak kullanıcı gelen
+ * kutusunu açtığında yapılabiliyordu. Oysa taşıma bir DOSYA işlemi —
+ * Maildir'de maili `.Junk/new/` altına taşımak yeterli, Dovecot orayı
+ * tarayıp indeksliyor. Karar sunucuda (model, eşikler), iş burada.
+ *
+ * Önce dosya taşınmayı deniyor (hızlı yol, mail hâlâ `new/` içindeyse
+ * çalışır). Dovecot arada `cur/`e almışsa `doveadm move` ile Message-ID
+ * üzerinden taşınıyor — indeksler tutarlı kalsın diye Dovecot'un kendi
+ * aracı.
+ *
  * ## Ne okunuyor
  *
  * `From`, `Subject` ve gövdeden kısa bir parça. Gövde parçası YALNIZCA
@@ -34,9 +51,13 @@
  *   HOOK_SECRET=... node maildir-izleyici.mjs
  */
 
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile, rename, stat } from "node:fs/promises";
 import { watch } from "node:fs";
+import { execFile } from "node:child_process";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const calistir = promisify(execFile);
 
 const KOK = process.env["MAILDIR_KOK"] ?? "/var/mail/vhosts";
 const HOOK = process.env["HOOK_URL"] ?? "http://127.0.0.1:3001/api/push/hook";
@@ -112,6 +133,16 @@ async function basliklariOku(dosya) {
     subject: al("Subject") || "(konu yok)",
     // "Ad <adres>" -> "Ad"; yoksa adresin kendisi
     from: from.replace(/\s*<[^>]*>\s*/, "").replace(/^"|"$/g, "").trim() || from,
+    /*
+      ADRES AYRI TAŞINIYOR.
+
+      `from` yalnızca görünen adı tutuyor (bildirimde öyle görünsün
+      diye). Ama sunucudaki "doğrulanmış gönderen taşınmaz" güvencesi
+      DOMAIN'e bakıyor — adres olmadan çalışamaz.
+    */
+    fromAddress: (from.match(/<([^>]+)>/)?.[1] ?? from).trim().toLowerCase(),
+    // doveadm ile taşımak gerekirse maili bununla buluyoruz
+    messageId: al("Message-ID"),
     govde,
   };
 }
@@ -136,14 +167,62 @@ async function bildir(kullanici, dosya) {
         folder: "INBOX",
         subject: basliklar.subject,
         from: basliklar.from,
+        fromAddress: basliklar.fromAddress,
         // Yalnızca skor için; bildirim yüküne girmiyor
         snippet: basliklar.govde,
       }),
     });
     const sonuc = await cevap.text();
-    console.log(`[${new Date().toISOString()}] ${kullanici} <- ${basliklar.from}: ${cevap.status} ${sonuc.slice(0, 80)}`);
+    console.log(`[${new Date().toISOString()}] ${kullanici} <- ${basliklar.from}: ${cevap.status} ${sonuc.slice(0, 90)}`);
+
+    let karar = null;
+    try {
+      karar = JSON.parse(sonuc);
+    } catch {
+      /* kanca metin döndüyse taşıma yok */
+    }
+    if (karar?.tasi) await spameTasi(kullanici, dosya, basliklar, karar);
   } catch (e) {
     console.error("kanca çağrılamadı:", e.message);
+  }
+}
+
+/**
+ * Maili Spam klasörüne taşır.
+ *
+ * 1) Hızlı yol: dosya hâlâ `new/` içindeyse `.Junk/new/` altına taşı.
+ * 2) Dovecot arada almışsa `doveadm move` ile Message-ID üzerinden.
+ *
+ * Taşınamazsa mail gelen kutusunda kalıyor — kullanıcı gelen kutusunu
+ * açtığında `bakimYap` yine yakalar. Yani bu bir HIZLANDIRMA, tek
+ * savunma hattı değil.
+ */
+async function spameTasi(kullanici, dosya, basliklar, karar) {
+  const yuzde = Math.round((karar.skor ?? 0) * 100);
+  const kok = path.dirname(path.dirname(dosya)); // <kutu>/new/<ad> -> <kutu>
+  const ad = path.basename(dosya);
+  const hedef = path.join(kok, ".Junk", "new", ad);
+
+  try {
+    await rename(dosya, hedef);
+    console.log(`  -> Spam'e taşındı (%${yuzde} ${karar.dil}): ${basliklar.subject.slice(0, 50)}`);
+    return;
+  } catch (e) {
+    if (e.code !== "ENOENT") {
+      console.error(`  -> dosya taşınamadı: ${e.message}`);
+    }
+  }
+
+  const mid = basliklar.messageId;
+  if (!mid) {
+    console.error("  -> Message-ID yok, doveadm ile taşınamıyor");
+    return;
+  }
+  try {
+    await calistir("doveadm", ["move", "-u", kullanici, "Junk", "mailbox", "INBOX", "HEADER", "Message-ID", mid]);
+    console.log(`  -> Spam'e taşındı [doveadm] (%${yuzde} ${karar.dil}): ${basliklar.subject.slice(0, 50)}`);
+  } catch (e) {
+    console.error(`  -> doveadm taşıyamadı: ${e.message.slice(0, 120)}`);
   }
 }
 
