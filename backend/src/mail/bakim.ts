@@ -53,6 +53,32 @@ import { buildPreview, htmlToOnizleme } from "./mime.js";
  */
 const TASIMA_ESIGI = Number(process.env["SPAM_TASIMA_ESIGI"] ?? 0.7);
 
+/**
+ * İNGİLİZCE İÇİN DAHA YÜKSEK EŞİK — 0.9.
+ *
+ * Türkçe model kullanıcının kendi arşiviyle eğitildi ve gerçek gelen
+ * kutusunda ölçüldü. İngilizce modelin eğitim verisi ise ağırlıklı
+ * olarak 2002-2006 dönemi külliyatlarından geliyor; modern işlem maili
+ * (SaaS bildirimi, abonelik, doğrulama) o dönemde yoktu.
+ *
+ * 2026-08-24'te ölçüldü — dışarıda tutulmuş 690 GERÇEK modern mailde
+ * yanlış alarm:
+ *     eşik %50 -> %1.30
+ *     eşik %70 -> %0.87
+ *     eşik %90 -> %0.58   <- seçilen
+ *
+ * Ayrıca modern SPAM yakalama ÖLÇÜLEMEDİ: Gmail spam'i 30 günde
+ * sildiği için arşivde yalnızca 4 İngilizce spam vardı. Yani bu modelin
+ * kaçırma oranı bilinmiyor. Yüksek eşik bu bilinmezliğe karşı da
+ * korunma: kaçırmak, meşru maili kaybetmekten iyidir.
+ */
+const TASIMA_ESIGI_EN = Number(process.env["SPAM_TASIMA_ESIGI_EN"] ?? 0.9);
+
+/** Mailin diline göre taşıma eşiği. */
+function tasimaEsigi(dil: "tr" | "en"): number {
+  return dil === "en" ? TASIMA_ESIGI_EN : TASIMA_ESIGI;
+}
+
 /** Spam kutusunda bu kadar günden eski mailler Çöp'e taşınır. */
 const SPAM_OMRU_GUN = Number(process.env["SPAM_OMRU_GUN"] ?? 30);
 
@@ -141,7 +167,10 @@ async function spameTasi(
   for (let i = 0; i < adaylar.length; i += 1) {
     const aday = adaylar[i];
     const onSkor = skorlar[i]?.skor ?? 0;
-    if (!aday || onSkor < TASIMA_ESIGI) continue;
+    // Ön eleme en DÜŞÜK eşikle yapılıyor; dile özel (daha yüksek) eşik
+    // gövdeyle yeniden skorlandıktan sonra uygulanıyor. Tersi olsaydı
+    // İngilizce mailler daha ucuza elenirdi.
+    if (!aday || onSkor < Math.min(TASIMA_ESIGI, TASIMA_ESIGI_EN)) continue;
 
     /**
      * TAŞIMADAN ÖNCE TAM GÖVDEYLE YENİDEN ÖLÇ.
@@ -159,25 +188,23 @@ async function spameTasi(
      * Yalnızca eşiği geçen AZ sayıda mail için tam gövde çekiliyor.
      */
     const { skor, dil } = await tamGovdeSkoru(client, aday.uid, aday.konu, onSkor);
-    if (skor < TASIMA_ESIGI) continue;
+
 
     /**
-     * İNGİLİZCE MODEL MAİL TAŞIYAMAZ.
+     * İngilizce model 2026-08-24'te gerçek e-posta verisiyle yeniden
+     * eğitildi; taşıma kısıtı o gün KALKTI.
      *
-     * Türkçe model kendi verisiyle yeniden eğitildi (%97) ama İngilizce
-     * model hâlâ eski: SMS spam'iyle eğitilmiş ve gerçek e-postada her
-     * şeye spam diyor (ölçüldü: GitHub uyarısı, Vercel faturası, kargo
-     * bildirimi — üçü de spam). Bu modele mail taşıtmak, kullanıcının
-     * postasını kaybettirmek demek.
+     * Önceki hâli SMS spam'iyle eğitilmişti ve gerçek maile her şeye
+     * spam diyordu — 2026-08-22'de Gmail'in yönlendirme onay maili bu
+     * yüzden Spam'e düşmüştü. Yeni model 28.460 gerçek e-posta ile
+     * eğitildi (TREC 2005/2006, SpamAssassin, kimlik avı külliyatları +
+     * kullanıcının kendi arşivinden 3.460 modern mail).
      *
-     * 2026-08-22'de gerçekten oldu: Gmail'in yönlendirme onay maili
-     * İngilizce konusu yüzünden bu modelden %90 alıp Spam'e taşındı.
-     *
-     * Rozet göstermeye devam ediyor (zararsız), ama taşıma ve bildirim
-     * bastırma gibi SONUÇ DOĞURAN kararları veremiyor. İngilizce model
-     * gerçek veriyle yeniden eğitilince bu kısıt kalkar.
+     * Kısıt yerine artık DAHA YÜKSEK EŞİK var (bkz. TASIMA_ESIGI_EN):
+     * ölçülen yanlış alarm %0.58. Eşiği aşmayan İngilizce mail
+     * taşınmıyor, rozeti yine görünüyor.
      */
-    if (dil === "en") continue;
+    if (skor < tasimaEsigi(dil)) continue;
 
     // Doğrulanmış gönderen (BIMI+VMC) asla taşınmaz: markasını sertifika
     // otoritesine doğrulatmış ve DMARC'ı zorlamada olan bir kurumdan

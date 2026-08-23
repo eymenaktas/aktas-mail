@@ -45,24 +45,56 @@
     "duyarlilik": 0.8425
   },
   "en": {
-    "normalize": false,
-    "surum": "2026-08-20",
-    "algoritma": "MultinomialNB + CountVectorizer",
-    "ornek_sayisi": 5158,
+    "normalize": true,
+    "egitim": "turkce_normalize (ASCII katlama) + lowercase=False",
+    "surum": "2026-08-24",
+    "algoritma": "LogisticRegression + CountVectorizer 1-2gram (min_df=5)",
+    "dogruluk": 0.9738,
+    "f1": 0.9815,
+    "kesinlik": 0.9765,
+    "duyarlilik": 0.9865,
+    "onceki_dogruluk": 0.4645,
+    "ornek_sayisi": 28459,
+    "denge": {
+      "ham": 8460,
+      "spam": 19999
+    },
     "kaynaklar": [
       {
-        "ad": "SMS Spam Collection (Kaggle)",
-        "adet": 5158,
-        "not": "SMS — e-posta değil"
+        "ad": "TREC 2005",
+        "adet": 20000,
+        "not": "gerçek ham mail külliyatı (spam örnekleri buradan ağırlıklı)"
+      },
+      {
+        "ad": "TREC 2006 + SpamAssassin + kimlik avı külliyatları",
+        "adet": 5000,
+        "not": "eski dönem ham"
+      },
+      {
+        "ad": "Eymen'in Gmail arşivi",
+        "adet": 3460,
+        "not": "MODERN işlem maili — SaaS bildirimi, fatura, doğrulama kodu"
       }
     ],
     "guclu": [
-      "Bariz İngilizce spam'i yakalıyor"
+      "Gerçek modern maillerde yanlış alarm %0.58 (690 örnekte ölçüldü, eşik %90)",
+      "Eski model %46.45 -> yeni %97.38 doğruluk (aynı test kümesi)",
+      "sklearn ile ONNX eşleşmesi %99.89",
+      "Artık SMS değil GERÇEK E-POSTA ile eğitildi (28.460 örnek)"
     ],
     "zayif": [
-      "GÜNCELLENMEDİ. Gerçek veriyle eğitilen aday %98.58 test doğruluğu aldı ama GitHub uyarısı, Vercel faturası ve kargo bildiriminin ÜÇÜNE DE spam dedi",
-      "Sebep: o veri setinin %48'inde sayılar 'escapenumber' ile değiştirilmiş ve ham tarafı eski forum yazışmaları — modern işlem maili yok",
-      "SMS ile eğitildiği için e-posta kalıplarını (imza, bülten, başlık) tanımıyor"
-    ]
+      "MODERN SPAM YAKALAMA ÖLÇÜLEMEDİ: Gmail spam'i 30 günde sildiği için arşivde yalnızca 4 İngilizce spam vardı. %98.65 duyarlılık 2005 dönemi spam'inde ölçüldü.",
+      "Eğitim verisinin çoğu 2002-2006 dönemi; o dönemde modern işlem maili yoktu. Modern ham tarafı yalnızca kullanıcının kendi arşivinden geliyor (3.460).",
+      "Kısa metinde güvenilmez: 5 cümlelik elle yazılmış sınavda 2/5. Uygulama modele konu+gövde veriyor, o yüzden üretimde sorun değil — ama konu tek başına skorlanmamalı.",
+      "Bu belirsizlik yüzünden taşıma eşiği %90 (Türkçe %70)."
+    ],
+    "tasima_esigi": 0.9,
+    "yanlis_alarm_olcumu": {
+      "ornek": 690,
+      "esik_50": 0.013,
+      "esik_70": 0.0087,
+      "esik_90": 0.0058,
+      "esik_95": 0.0043
+    }
   }
 }
