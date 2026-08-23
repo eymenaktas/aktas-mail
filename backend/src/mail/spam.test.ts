@@ -53,6 +53,14 @@ test("tek bir Türkçe harf metni Türkçe yapmıyor", () => {
   );
 });
 
+test("bozuk kodlanmış CJK spam İngilizce modele gidiyor", () => {
+  // Bu metinlerde Ç, ¿, ½ gibi karakterler var ama Türkçe KELİME yok.
+  // Harflere bakıp tr deseydik Türkçe modele giderdi ve %100 yerine
+  // %10 alırdı (2026-08-24'te 20 gerçek spam'le ölçüldü).
+  assert.equal(diliTahminEt("»ùÇÃCD¿¡ ¹ßÀ½±³Á¤Ã¥ÀÚ! ±×¸®°í ·¹º§Å×½ºÆ®±îÁö"), "en");
+  assert.equal(diliTahminEt("非公式、非公認サイト 女喰いまくれるサイトの ホームページ"), "en");
+});
+
 test("gerçekten Türkçe metin hâlâ tr", () => {
   assert.equal(
     diliTahminEt("Sayın müşterimiz, siparişiniz kargoya verildi ve " +

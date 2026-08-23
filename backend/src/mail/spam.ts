@@ -153,10 +153,26 @@ function oturumAl(dil: ModelDili): Promise<ort.InferenceSession> {
  * bu yüzden kaçtı ("Save $30k even if you've refi'd" -> tr, %0).
  *
  * Doğrusu tek işaret aramak değil ORAN bakmak: hangi dilin işlev
- * kelimeleri baskınsa mailin dili odur. Türkçe'ye özgü harfler tek
- * başına karar vermiyor, yalnızca Türkçe tarafına ağırlık ekliyor.
+ * kelimeleri baskınsa mailin dili odur.
+ *
+ * TÜRKÇE HARFLER TEK BAŞINA YETMİYOR — Türkçe KELİME de gerekiyor.
+ * İlk düzeltmede harfleri ağırlık olarak eklemiştim ve gerileme oldu:
+ * bozuk kodlanmış Japonca/Korece spam (`»ùÇÃCD¿¡`, `¤ë·s¼W`) içinde
+ * Ç, ¿, ½ gibi karakterler bulunduğu için Türkçe sayılıp Türkçe modele
+ * gitti ve %100'den %10'a düştü. Ölçüldü, 20 gerçek spam'le.
+ *
+ * Ne Türkçe ne İngilizce olan metin İNGİLİZCE modele gidiyor: o model
+ * TREC/SpamAssassin külliyatlarıyla eğitildi ve bu tür spam'i görmüş.
  */
-const TR_HARF = /[şğıİĞŞÇÖÜçöü]/g;
+/**
+ * AYRIM ÖNEMLİ:
+ *   TR_OZGU  — yalnızca Türkçe'de bulunan harfler (ğ ı ş İ Ğ Ş).
+ *              Güçlü kanıt: bunlar varsa metin gerçekten Türkçe.
+ *   TR_ORTAK — ç ö ü. Fransızca, Almanca, İspanyolca'da da var ve
+ *              BOZUK KODLAMADA sık çıkıyor (`»ùÇÃCD¿¡`). Tek başına
+ *              kanıt sayılmıyor, yoksa Korece spam Türkçe oluyor.
+ */
+const TR_OZGU = /[ğıİĞŞş]/g;
 const TR_KELIME =
   /\b(ve|bir|için|bu|ile|olarak|değil|daha|çok|var|yok|merhaba|sayın|teşekkür|lütfen|tarih|kargo|sipariş|hesab\w*|gün|saat|kayıt|üye|indirim|tutar)\b/gi;
 const EN_KELIME =
@@ -166,11 +182,14 @@ export function diliTahminEt(metin: string): ModelDili {
   const ornek = metin.slice(0, 4000);
   const trKelime = (ornek.match(TR_KELIME) ?? []).length;
   const enKelime = (ornek.match(EN_KELIME) ?? []).length;
-  // Türkçe harfler tek başına karar vermiyor; sayıları Türkçe tarafına
-  // ölçülü bir katkı yapıyor (her 3 harf ~ 1 kelime ağırlığında).
-  const trHarf = (ornek.match(TR_HARF) ?? []).length;
-  const tr = trKelime + trHarf / 3;
-  return enKelime > tr ? "en" : "tr";
+  const trOzgu = (ornek.match(TR_OZGU) ?? []).length;
+
+  // Türkçe'ye özgü harf VE Türkçe kelime yoksa Türkçe deme: geriye kalan
+  // tek kanıt ç/ö/ü olur ve onlar bozuk kodlamada yanıltıyor.
+  if (trKelime === 0 && trOzgu === 0) return "en";
+
+  // Kanıt varsa oranla: özgü harfler ölçülü katkı (3 harf ~ 1 kelime).
+  return enKelime > trKelime + trOzgu / 3 ? "en" : "tr";
 }
 
 /**
