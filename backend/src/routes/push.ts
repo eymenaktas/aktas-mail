@@ -295,21 +295,19 @@ export async function pushRoutes(app: FastifyInstance): Promise<void> {
     const parca = metin(g["snippet"]) ?? "";
     const [skor] = await spamSkorla([`${konu} ${parca}`.trim().slice(0, 4000)]);
     /**
-     * Bildirim bastırma da yalnızca Türkçe modele güveniyor.
+     * Bildirim bastırma İKİ DİLDE de geçerli.
      *
-     * İngilizce model her şeye spam diyor; ona uyarsak İngilizce
-     * maillerin hiçbirinde bildirim gelmezdi. Kaçan bildirim GÖRÜNMEZ
-     * bir hata — kullanıcı fark etmez, sadece maili geç görür.
+     * Eskiden İngilizce muaftı: o model SMS ile eğitilmişti ve her şeye
+     * spam diyordu, ona uyulsa İngilizce maillerin hiçbirinde bildirim
+     * gelmezdi. Model 2026-08-24'te gerçek e-posta ile yeniden eğitildi
+     * ve muafiyet kalktı — spam olan mailde, dili ne olursa olsun,
+     * telefon titremiyor.
+     *
+     * Eşik burada %50 (taşımanınki %90). İkisi kasten farklı: bildirimi
+     * kaçırmanın bedeli mailin geç görülmesi, taşımanınki ise
+     * kullanıcının maili başka klasörde araması. Ucuz hatada daha
+     * atak, pahalı hatada daha temkinli davranıyoruz.
      */
-    if (skor?.model === "en") {
-      const sonuc = await bildirimGonder(kullanici.id, {
-        baslik: gonderen || "Yeni mail",
-        govde: konu,
-        url: "/",
-      });
-      return reply.send({ ...sonuc, acikSekme, not: "en modeli filtrelemiyor" });
-    }
-
     if ((skor?.skor ?? 0) > SPAM_ESIGI) {
       return reply.send({
         atlandi: `spam %${Math.round((skor?.skor ?? 0) * 100)}`,

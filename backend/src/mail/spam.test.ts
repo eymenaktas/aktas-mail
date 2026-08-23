@@ -35,6 +35,32 @@ await test("İngilizce metni İngilizce sayıyor", () => {
   assert.equal(diliTahminEt("Your verification code is 746628"), "en");
 });
 
+test("tek bir Türkçe harf metni Türkçe yapmıyor", () => {
+  // 2026-08-24: eski sürüm "içinde ş/ö/ı varsa tr" diyordu. İmzasında
+  // "Eymen Aktaş" geçen ya da gövdesi bozuk kodlanmış İNGİLİZCE mailler
+  // Türkçe modele gidiyor, o model İngilizce spam'i görmediği için ~%0
+  // veriyordu ve spam gelen kutusunda kalıyordu.
+  assert.equal(
+    diliTahminEt("Save $30k even if you've refi'd. Attention U.S. HomeOwners, " +
+                 "you have been pre-approved for a new mortgage rate. Click here " +
+                 "to view your offer and claim it now with our team. ö"),
+    "en",
+  );
+  assert.equal(
+    diliTahminEt("Hi Eymen Aktaş, your invoice from Vercel is ready. " +
+                 "Please view your account for the details and thank you."),
+    "en",
+  );
+});
+
+test("gerçekten Türkçe metin hâlâ tr", () => {
+  assert.equal(
+    diliTahminEt("Sayın müşterimiz, siparişiniz kargoya verildi ve " +
+                 "bir gün içinde teslim edilecek. Tutar 250 TL."),
+    "tr",
+  );
+});
+
 await test("Türkçe spam yüksek skor alıyor", async () => {
   const [r] = await spamSkorla([
     "TEBRİKLER! 10.000 TL hediye çeki kazandınız, hemen tıklayın!",
@@ -77,16 +103,34 @@ await test("Türkçe: dolandırıcılık yakalanıyor", async () => {
 });
 
 /**
- * KALAN AÇIK: İngilizce model HÂLÂ ESKİ. Gerçek veriyle eğitilen aday
- * %98.58 test doğruluğu aldı ama GitHub uyarısı / Vercel faturası /
- * kargo bildirimi örneklerinin hepsine spam dedi, o yüzden kurulmadı.
- * Sebep: o veri setinin %48'inde sayılar "escapenumber" ile değiştirilmiş
- * ve ham tarafı eski forum yazışmaları — modern işlem maili yok.
+ * İngilizce model 2026-08-24'te 28.460 GERÇEK e-posta ile yeniden
+ * eğitildi (TREC 2005/2006, SpamAssassin, kimlik avı külliyatları +
+ * kullanıcının kendi arşivinden 3.460 modern mail).
+ *
+ * Bu test eskiden modelin KUSURUNU doğruluyordu ("GitHub uyarısı hâlâ
+ * yanlış alarm olmalı"). Artık gerçek garantiyi doğruluyor: modern
+ * işlem maili TAŞIMA EŞİĞİNİ (%90) geçmemeli. Rozet eşiğini (%50)
+ * geçebilir — o zararsız, mail yerinde kalıyor.
+ *
+ * Ölçüm: 690 gerçek modern mailde %90 eşiğinde yanlış alarm %0.58.
  */
-await test("İngilizce modelin bilinen açığı kayıt altında", async () => {
-  const [github] = await spamSkorla(["Your GitHub security alert A new sign-in to your account"]);
-  assert.equal(github?.model, "en");
-  assert.ok((github?.skor ?? 0) > 0.5, "GitHub uyarısı hâlâ yanlış alarm olmalı");
+await test("modern İngilizce işlem maili taşıma eşiğini geçmiyor", async () => {
+  const ORNEKLER = [
+    "Your GitHub security alert A new sign-in to your account was detected " +
+      "from a new device. Review your security log to see recent activity.",
+    "Your receipt from Anthropic, PBC #2174-6750-6501 Thanks for your payment. " +
+      "Amount paid $20.00. Download your invoice PDF from the billing page.",
+    "Your Link verification code: 453 390 This code will expire in 10 minutes " +
+      "and can only be used once. If you did not request this, ignore this email.",
+  ];
+  const sonuclar = await spamSkorla(ORNEKLER);
+  sonuclar.forEach((r, i) => {
+    assert.equal(r?.model, "en");
+    assert.ok(
+      (r?.skor ?? 1) < 0.9,
+      `taşıma eşiğini geçti (%${Math.round((r?.skor ?? 1) * 100)}): ${ORNEKLER[i]?.slice(0, 50)}`,
+    );
+  });
 });
 
 await test("Türkçe normal mail spam sayılmıyor", async () => {

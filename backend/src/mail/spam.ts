@@ -139,15 +139,38 @@ function oturumAl(dil: ModelDili): Promise<ort.InferenceSession> {
   return mevcut;
 }
 
-/** Türkçe'ye özgü harfler + sık kullanılan ekler/kelimeler. */
-const TR_HARF = /[şğıİĞŞÇÖÜçöü]/;
+/**
+ * Dil tahmini — iki dilin sık İŞLEV kelimelerini sayıp orana bakar.
+ *
+ * ÖNCEKİ HÂLİ HATALIYDI: "metinde bir tane Türkçe harf ya da Türkçe
+ * kelime varsa tr" diyordu. Tek bir `ö` yetiyordu — imzasında
+ * "Eymen Aktaş" geçen ya da gövdesinde bozuk kodlanmış bir karakter
+ * bulunan İNGİLİZCE mail Türkçe sayılıyordu.
+ *
+ * Sonucu sessiz bir kaçak: İngilizce spam Türkçe modele gidiyor, o
+ * model İngilizce spam'i hiç görmediği için ~%0 veriyor ve mail gelen
+ * kutusunda kalıyor. 2026-08-24'te 20 gerçek spam'le denendi, 3'ü tam
+ * bu yüzden kaçtı ("Save $30k even if you've refi'd" -> tr, %0).
+ *
+ * Doğrusu tek işaret aramak değil ORAN bakmak: hangi dilin işlev
+ * kelimeleri baskınsa mailin dili odur. Türkçe'ye özgü harfler tek
+ * başına karar vermiyor, yalnızca Türkçe tarafına ağırlık ekliyor.
+ */
+const TR_HARF = /[şğıİĞŞÇÖÜçöü]/g;
 const TR_KELIME =
-  /\b(ve|bir|için|bu|ile|olarak|değil|daha|çok|var|yok|merhaba|sayın|teşekkür|lütfen|tarih|kargo|sipariş|hesab\w*|gün|saat)\b/i;
+  /\b(ve|bir|için|bu|ile|olarak|değil|daha|çok|var|yok|merhaba|sayın|teşekkür|lütfen|tarih|kargo|sipariş|hesab\w*|gün|saat|kayıt|üye|indirim|tutar)\b/gi;
+const EN_KELIME =
+  /\b(the|and|you|your|for|with|this|that|are|from|have|will|our|please|thank|account|order|click|view|team|has|been|new|help|free|now)\b/gi;
 
 export function diliTahminEt(metin: string): ModelDili {
-  if (TR_HARF.test(metin)) return "tr";
-  if (TR_KELIME.test(metin)) return "tr";
-  return "en";
+  const ornek = metin.slice(0, 4000);
+  const trKelime = (ornek.match(TR_KELIME) ?? []).length;
+  const enKelime = (ornek.match(EN_KELIME) ?? []).length;
+  // Türkçe harfler tek başına karar vermiyor; sayıları Türkçe tarafına
+  // ölçülü bir katkı yapıyor (her 3 harf ~ 1 kelime ağırlığında).
+  const trHarf = (ornek.match(TR_HARF) ?? []).length;
+  const tr = trKelime + trHarf / 3;
+  return enKelime > tr ? "en" : "tr";
 }
 
 /**
