@@ -82,8 +82,20 @@ function tasimaEsigi(dil: "tr" | "en"): number {
 /** Spam kutusunda bu kadar günden eski mailler Çöp'e taşınır. */
 const SPAM_OMRU_GUN = Number(process.env["SPAM_OMRU_GUN"] ?? 30);
 
-/** Aynı kullanıcı için bakımın en sık çalışma aralığı. */
-const ARALIK_MS = 10 * 60 * 1000;
+/**
+ * Aynı kullanıcı için bakımın en sık çalışma aralığı.
+ *
+ * 10 dakikaydı, 2026-08-24'te 2 dakikaya indirildi. Sebep: bakım
+ * yalnızca kullanıcı gelen kutusunu açtığında çalışabiliyor (sunucu
+ * IMAP parolasını saklamıyor, arka plan işi yapısal olarak imkânsız).
+ * 10 dakikalık soğuma, "yeni gelen spam neden hâlâ duruyor?" sorusuna
+ * yol açıyordu: 100 test spam'i geldiğinde bakım 4 dakika önce koşmuştu
+ * ve sıradaki hakkı 6 dakika sonraydı.
+ *
+ * Maliyeti düşük: her koşu yalnızca son 50 OKUNMAMIŞ maile bakıyor ve
+ * zaten kullanıcı listeleme yaparken tetikleniyor.
+ */
+const ARALIK_MS = Number(process.env["SPAM_BAKIM_ARALIK_MS"] ?? 2 * 60 * 1000);
 
 const sonCalisma = new Map<string, number>();
 
@@ -311,6 +323,7 @@ export async function bakimYap(
   if (Date.now() - son < ARALIK_MS) return BOS;
   sonCalisma.set(kullanici, Date.now());
 
+  const basladi = Date.now();
   try {
     const spamKutusu = await kutuBul(client, "\\Junk", ["Junk", "Spam"]);
     if (!spamKutusu) return BOS;
@@ -334,9 +347,35 @@ export async function bakimYap(
       }
     }
 
+    /*
+      Bakımın çalıştığı GÖRÜNÜR olmalı.
+
+      2026-08-24'te 100 test spam'i taşınmadı ve sebebini anlamak için
+      log yerine veritabanındaki denetim kaydına bakmak gerekti —
+      "bakım koştu ama taşıyacak şey bulamadı" ile "bakım hiç koşmadı"
+      dışarıdan aynı görünüyordu. Artık ayırt edilebiliyor.
+    */
+    console.log(
+      JSON.stringify({
+        olay: "bakim",
+        kullanici,
+        tasinan,
+        temizlenen,
+        sureMs: Date.now() - basladi,
+      }),
+    );
     return { tasinan, temizlenen };
-  } catch {
+  } catch (hata) {
     // Bakım bir ek hizmet; başarısız olursa mail listesi yine dönmeli.
+    // Ama SESSİZ kalmamalı: eskiden `catch {}` idi ve bir çökme,
+    // "yapacak iş yoktu" ile birebir aynı görünüyordu.
+    console.error(
+      JSON.stringify({
+        olay: "bakim.hata",
+        kullanici,
+        hata: hata instanceof Error ? hata.message : String(hata),
+      }),
+    );
     return BOS;
   }
 }

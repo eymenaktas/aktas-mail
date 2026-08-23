@@ -64,7 +64,8 @@ export function Avatar({
           ? address
           : avatar.source === "bimi"
             ? `${address} — logosu BIMI ile yayınlanmış ve bir sertifika otoritesince doğrulanmış (VMC)`
-            : `${address} — bu domain DMARC'ı "reject"e almış, yani taklit edilemiyor. ` +
+            : `${address} — bu domain DMARC'ı zorlamaya almış (reject/quarantine), ` +
+              `yani taklit edilemiyor. ` +
               `Mail gerçekten bu domainden geliyor. (Marka doğrulaması yok.)`
       }
     >

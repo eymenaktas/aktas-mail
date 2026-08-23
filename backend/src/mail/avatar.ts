@@ -168,9 +168,22 @@ export async function bimiCoz(domain: string): Promise<AvatarSonucu | null> {
  * > VMC, markayı bir sertifika otoritesinin doğrulaması demek.
  * > DMARC yalnızca "bu domain taklit edilemez" diyor — domainin
  * > KİME ait olduğunu ve iyi niyetli olduğunu söylemiyor. Kötü niyetli
- * > biri de p=reject yayınlayabilir. Bu yüzden yalnızca `reject`
- * > kabul ediliyor (`quarantine` bile yetmiyor) ve arayüzde ipucu
- * > metni dayanağı açıkça yazıyor.
+ * > biri de p=reject yayınlayabilir. Arayüzdeki ipucu metni bu yüzden
+ * > dayanağı açıkça yazıyor.
+ *
+ * ## 2026-08-24: `quarantine` de kabul ediliyor
+ *
+ * Önce yalnızca `reject` kabul ediliyordu. GitHub bu yüzden tik
+ * alamıyordu — ölçüldü:
+ *
+ *     github.com   p=quarantine; sp=reject   -> tik YOKtu
+ *     google.com   p=reject                  -> tik vardı
+ *
+ * Oysa ayrım pratikte anlamlı değil: ikisi de ZORLAYICI politika.
+ * `reject` sahte maili reddettiriyor, `quarantine` spam klasörüne
+ * attırıyor — her iki durumda da taklit mail gelen kutusuna DÜŞMÜYOR.
+ * Asıl ayrım `p=none` ile olan: o yalnızca rapor toplar, hiçbir
+ * koruma vermez ve tik almaz (gmail.com böyle).
  */
 async function dmarcZorluyorMu(domain: string): Promise<boolean> {
   // BIMI'deki gibi kuruluş domainine kadar geri çekil
@@ -179,9 +192,8 @@ async function dmarcZorluyorMu(domain: string): Promise<boolean> {
     if (!kayitlar?.length) continue;
     const kayit = kayitlar.map((k) => k.join("")).find((k) => /^\s*v=DMARC1/i.test(k));
     if (!kayit) continue;
-    // Yalnızca en katı politika: quarantine "belki spam klasörüne" demek,
-    // reject "hiç kabul etme" demek.
-    return /\bp\s*=\s*reject\b/i.test(kayit);
+    // Zorlayıcı politika: reject ya da quarantine. `none` koruma vermez.
+    return /\bp\s*=\s*(reject|quarantine)\b/i.test(kayit);
   }
   return false;
 }
