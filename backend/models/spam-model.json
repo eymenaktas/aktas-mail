@@ -1,0 +1,68 @@
+{
+  "tr": {
+    "normalize": true,
+    "egitim": "turkce_normalize (ASCII katlama) + lowercase=False",
+    "surum": "2026-08-21",
+    "algoritma": "LogisticRegression + CountVectorizer 1-2gram (min_df=2)",
+    "dogruluk": 0.9705,
+    "onceki_dogruluk": 0.7411,
+    "ornek_sayisi": 9500,
+    "kaynaklar": [
+      {
+        "ad": "Gmail arşivin",
+        "adet": 7810,
+        "not": "kendi gelen kutun — X-Gmail-Labels etiketleriyle"
+      },
+      {
+        "ad": "emrahaydemr (Kaggle)",
+        "adet": 1004,
+        "not": "gerçek Türkçe mail: banka ekstresi, kargo, şifre"
+      },
+      {
+        "ad": "orvile (Kaggle, CC BY 4.0)",
+        "adet": 688,
+        "not": "Türkçe spam/ham derlemesi"
+      }
+    ],
+    "denge": {
+      "ham": 8769,
+      "spam": 731
+    },
+    "guclu": [
+      "Kargo, fatura ve doğrulama kodu mailleri artık spam sayılmıyor (eskiden %100/%23/%6)",
+      "Türkçe hediye çeki ve kredi dolandırıcılığı yakalanıyor",
+      "sklearn ile ONNX eşleşmesi %99.84 — ASCII katlama sayesinde"
+    ],
+    "zayif": [
+      "F1 %81.5 — doğruluk (%97) yanıltıcı, çünkü maillerin %92'si zaten normal",
+      "Duyarlılık %84: gerçek spam'in ~%16'sını kaçırıyor",
+      "Kesinlik %79: 'spam' dediğinin ~%21'i aslında normal mail",
+      "Spam örneği az (731) — gördüğü dolandırıcılık çeşidi sınırlı",
+      "Gmail arşivinde yalnızca 17 spam vardı (Gmail 30 günde siliyor)"
+    ],
+    "f1": 0.8146,
+    "kesinlik": 0.7885,
+    "duyarlilik": 0.8425
+  },
+  "en": {
+    "normalize": false,
+    "surum": "2026-08-20",
+    "algoritma": "MultinomialNB + CountVectorizer",
+    "ornek_sayisi": 5158,
+    "kaynaklar": [
+      {
+        "ad": "SMS Spam Collection (Kaggle)",
+        "adet": 5158,
+        "not": "SMS — e-posta değil"
+      }
+    ],
+    "guclu": [
+      "Bariz İngilizce spam'i yakalıyor"
+    ],
+    "zayif": [
+      "GÜNCELLENMEDİ. Gerçek veriyle eğitilen aday %98.58 test doğruluğu aldı ama GitHub uyarısı, Vercel faturası ve kargo bildiriminin ÜÇÜNE DE spam dedi",
+      "Sebep: o veri setinin %48'inde sayılar 'escapenumber' ile değiştirilmiş ve ham tarafı eski forum yazışmaları — modern işlem maili yok",
+      "SMS ile eğitildiği için e-posta kalıplarını (imza, bülten, başlık) tanımıyor"
+    ]
+  }
+}

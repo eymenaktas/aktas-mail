@@ -1,5 +1,7 @@
 import {
   pgTable,
+  jsonb,
+  doublePrecision,
   serial,
   text,
   timestamp,
@@ -35,6 +37,26 @@ export const users = pgTable(
     /** Posta kutusunun tam adresi: eymen@akts.tr */
     email: text("email").notNull(),
     displayName: text("display_name"),
+
+    /**
+     * Kullanıcının kendi profil fotoğrafı — `data:image/...;base64,...`.
+     * İstemci yüklemeden önce 256x256'ya küçültüp WebP'ye çeviriyor, o
+     * yüzden sunucuda görüntü işleme kütüphanesi (sharp vb.) yok.
+     * Boyut sınırı ve tür doğrulaması yükleme ucunda.
+     */
+    avatar: text("avatar"),
+
+    /**
+     * Cihazdan bağımsız kullanıcı tercihleri (tema, renk, desen...).
+     *
+     * Önce yalnızca localStorage'daydı, yani her cihazda ayrı ayrı
+     * ayarlamak gerekiyordu. Artık hesapta duruyor; localStorage
+     * yalnızca ilk boyamada beklememek için ÖNBELLEK olarak kalıyor.
+     *
+     * jsonb: şema değişmeden yeni tercih eklenebilsin diye. İçeriği
+     * uygulama tarafında Zod ile doğrulanıyor.
+     */
+    settings: jsonb("settings"),
 
     /** Kullanıcının seçtiği ikinci faktör. "none" = sadece parola. */
     secondFactor: secondFactorEnum("second_factor").notNull().default("none"),
@@ -226,4 +248,108 @@ export const auditLog = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("audit_user_time_idx").on(t.userId, t.createdAt)],
+);
+
+/**
+ * Gönderen avatarı önbelleği (BIMI).
+ *
+ * Gmail'in gönderen logolarını ve "mavi tik"ini nereden aldığı sorusunun
+ * cevabı: BIMI (Brand Indicators for Message Identification). Domain
+ * `default._bimi.<domain>` TXT kaydında logosunun SVG adresini yayınlar.
+ * Kayıtta `a=` ile bir VMC (Verified Mark Certificate) varsa marka bir
+ * sertifika otoritesi tarafından doğrulanmış demektir — mavi tik budur.
+ * Gmail'den veri çekmiyoruz; Gmail'in de kullandığı AÇIK kaynağa bakıyoruz.
+ *
+ * Önbellek şart: her mail açılışında DNS + HTTP isteği atmak hem yavaş
+ * hem de gönderene "bu mail okundu" sinyali verir. Aramalar sunucudan
+ * yapılır, tarayıcıdan değil — kullanıcının IP'si gönderene sızmaz.
+ */
+export const senderAvatars = pgTable(
+  "sender_avatars",
+  {
+    /** Ya bir domain ("tiktok.com" — BIMI) ya tam adres ("ali@x.com" — Gravatar) */
+    key: text("key").primaryKey(),
+    /** data: URI olarak logo/fotoğraf; bulunamadıysa null */
+    image: text("image"),
+    /** VMC doğrulanmış mı — arayüzdeki mavi tik */
+    verified: boolean("verified").notNull().default(false),
+    /** bimi | gravatar | none */
+    source: text("source").notNull().default("none"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+/**
+ * Spam eğitim verisi — kullanıcının elle işaretlediği mailler.
+ *
+ * Mevcut model (ML kampı Gün 1) SMS spam'i ve küçük bir Türkçe e-posta
+ * kümesiyle eğitildi; gerçek gelen kutusunda yanılıyor (kargo maillerine
+ * spam diyor, bazı gerçek spam'i kaçırıyor). Doğru çözüm eşikle oynamak
+ * değil, MODELİ GERÇEK VERİYLE YENİDEN EĞİTMEK. Bu tablo o veriyi
+ * biriktiriyor.
+ *
+ * Ne saklanıyor: konu + gövdenin ilk kısmı (düz metin). Tam mail
+ * saklanmıyor — eğitim için gerekmiyor ve gereksiz kopya risk demek.
+ * `modelSkoru` da yazılıyor ki sonradan "model nerede yanılmış"
+ * sorusu cevaplanabilsin.
+ */
+export const spamLabels = pgTable(
+  "spam_labels",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+
+    /** "spam" | "ham" */
+    label: text("label").notNull(),
+    /** İşaret nereden geldi: "elle" (düğme) | "tasima" (kullanıcı klasör değiştirdi) */
+    kaynak: text("kaynak").notNull().default("elle"),
+
+    subject: text("subject").notNull().default(""),
+    /** Gövdenin düz metin hâli, kırpılmış */
+    body: text("body").notNull().default(""),
+    fromAddress: text("from_address"),
+
+    /** İşaretlendiği andaki model skoru — "nerede yanılmış" analizi için */
+    modelSkoru: doublePrecision("model_skoru"),
+    modelDili: text("model_dili"),
+
+    /** Aynı maili iki kez toplamamak için */
+    messageKey: text("message_key").notNull(),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("spam_labels_user_idx").on(t.userId),
+    uniqueIndex("spam_labels_msg_key").on(t.userId, t.messageKey),
+  ],
+);
+
+/**
+ * Web push abonelikleri.
+ *
+ * Her cihaz (tarayıcı profili) için ayrı bir kayıt: aynı hesap iki
+ * telefondan açıldıysa iki abonelik olur ve bildirim ikisine de gider.
+ *
+ * `endpoint` tarayıcının push servisinin adresi (Chrome için FCM, Safari
+ * için Apple) ve KİMLİK görevi görüyor — birincil anahtar o.
+ * `p256dh` + `auth` ise şifreleme anahtarları: push servisi mesajın
+ * içeriğini OKUYAMIYOR, yalnızca cihaza iletiyor.
+ */
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    endpoint: text("endpoint").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    /** Hangi cihaz olduğunu ayırt etmek için (Ayarlar'da listelenir) */
+    label: text("label"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+  },
+  (t) => [index("push_user_idx").on(t.userId)],
 );

@@ -1,0 +1,315 @@
+import type { ImapFlow } from "imapflow";
+import { audit } from "../lib/audit.js";
+import { spamSkorla } from "./spam.js";
+import { avatarGetir } from "./avatar-cache.js";
+import { simpleParser } from "mailparser";
+import { buildPreview, htmlToOnizleme } from "./mime.js";
+
+/**
+ * Gelen kutusu bakımı: spam taşıma ve eski spam temizliği.
+ *
+ * ## Neden istek sırasında çalışıyor, arka planda değil?
+ *
+ * Uygulama IMAP parolasını saklamıyor — oturum anahtarı yalnızca
+ * istemcide (httpOnly çerez) duruyor ve sunucu her istekte alıp
+ * kullanıp atıyor. Yani kullanıcı istekte bulunmadan posta kutusuna
+ * erişilemiyor; zamanlanmış bir arka plan işi YAPISAL OLARAK mümkün
+ * değil. Bakım bu yüzden gelen kutusu listelenirken tetikleniyor.
+ *
+ * ## Yanlış alarm riski
+ *
+ * Spam modeli küçük veriyle eğitildi ve gerçek gelen kutusunda
+ * yanılıyor (ölçüm: `spam.ts`). Mail TAŞIMAK, rozet göstermekten çok
+ * daha ağır bir karar — geri alınabilir ama kullanıcı mailin kaybolduğunu
+ * fark etmeyebilir. Bu yüzden taşıma eşiği rozet eşiğinden ÇOK daha
+ * yüksek ve dört ayrı emniyet var:
+ *
+ *   1. Yalnızca OKUNMAMIŞ mail taşınır — okuduğun bir şey yerinden oynamaz
+ *   2. YILDIZLI mail asla taşınmaz
+ *   3. DOĞRULANMIŞ gönderen (BIMI+VMC) asla taşınmaz — TikTok, PayPal,
+ *      banka gibi kurumların maili spam'e düşmesin
+ *   4. Her taşıma `audit_log`'a yazılır (konu + skor), yani neyin nereye
+ *      gittiği sonradan bulunabilir
+ */
+
+/**
+ * Taşıma eşiği — Eymen 0.7 istedi (2026-08-22).
+ *
+ * Üç kademeli sistem:
+ *   %20 üstü -> uzak görseller açılmaz (takip pikseli riski)
+ *   %50 üstü -> listede "spam? %62" rozeti
+ *   %70 üstü -> Spam klasörüne TAŞINIR
+ *
+ * > [!warning] %70 agresif bir eşik
+ * > Türkçe model kendi test kümesinde %97 doğru ama kusursuz değil.
+ * > Bu eşikte gerçek bir mailin Spam'e düşmesi mümkün. Dört emniyet
+ * > bunu sınırlıyor (okunmamış + yıldızsız + doğrulanmamış gönderen +
+ * > her taşıma audit_log'a yazılıyor) ama sıfırlamıyor. Spam klasörünü
+ * > ara sıra gözden geçir; yanlış giden olursa "Spam değil" de, model
+ * > onu öğrenir.
+ *
+ * `SPAM_TASIMA_ESIGI` ile değiştirilebilir; 0'dan büyük değilse taşıma
+ * tamamen kapanır.
+ */
+const TASIMA_ESIGI = Number(process.env["SPAM_TASIMA_ESIGI"] ?? 0.7);
+
+/** Spam kutusunda bu kadar günden eski mailler Çöp'e taşınır. */
+const SPAM_OMRU_GUN = Number(process.env["SPAM_OMRU_GUN"] ?? 30);
+
+/** Aynı kullanıcı için bakımın en sık çalışma aralığı. */
+const ARALIK_MS = 10 * 60 * 1000;
+
+const sonCalisma = new Map<string, number>();
+
+export interface BakimSonucu {
+  /** Spam'e taşınan mail sayısı */
+  tasinan: number;
+  /** Spam'den Çöp'e taşınan (süresi dolmuş) mail sayısı */
+  temizlenen: number;
+}
+
+const BOS: BakimSonucu = { tasinan: 0, temizlenen: 0 };
+
+/** specialUse bayrağına göre kutu yolunu bulur; yoksa isme bakar. */
+async function kutuBul(
+  client: ImapFlow,
+  ozel: "\\Junk" | "\\Trash",
+  yedekIsimler: string[],
+): Promise<string | null> {
+  const liste = await client.list();
+  const ozelKutu = liste.find((m) => m.specialUse === ozel);
+  if (ozelKutu) return ozelKutu.path;
+
+  const isimle = liste.find((m) =>
+    yedekIsimler.some((ad) => m.path.toLowerCase() === ad.toLowerCase()),
+  );
+  return isimle?.path ?? null;
+}
+
+/**
+ * Gelen kutusundaki okunmamış maillerden eşiği geçenleri Spam'e taşır.
+ * Taşınan UID'leri döner ki çağıran onları listeden düşürebilsin.
+ */
+async function spameTasi(
+  client: ImapFlow,
+  spamKutusu: string,
+  userId: number,
+): Promise<{ tasinan: number; uidler: number[] }> {
+  if (!(TASIMA_ESIGI > 0)) return { tasinan: 0, uidler: [] };
+
+  // Yalnızca okunmamışlar: okuduğun bir mail yerinden oynamamalı.
+  const bulunan = await client.search({ seen: false }, { uid: true });
+  const okunmamis = Array.isArray(bulunan) ? bulunan : [];
+  if (okunmamis.length === 0) return { tasinan: 0, uidler: [] };
+
+  // Son 50 okunmamış yeterli; kutunun tamamını her seferinde taramak pahalı.
+  const bakilacak = okunmamis.slice(-50);
+
+  interface Aday {
+    uid: number;
+    konu: string;
+    metin: string;
+    yildizli: boolean;
+    adres: string;
+  }
+  const adaylar: Aday[] = [];
+
+  for await (const msg of client.fetch(
+    bakilacak.join(","),
+    { uid: true, envelope: true, flags: true, bodyStructure: true, bodyParts: ["1", "1.1"] },
+    { uid: true },
+  )) {
+    const bayraklar = msg.flags ?? new Set<string>();
+    // Yıldızlı mail asla taşınmaz.
+    if (bayraklar.has("\\Flagged")) continue;
+
+    const konu = msg.envelope?.subject ?? "";
+    adaylar.push({
+      uid: msg.uid,
+      konu,
+      metin: `${konu} ${buildPreview(msg.bodyParts, msg.bodyStructure)}`.trim(),
+      yildizli: false,
+      adres: msg.envelope?.from?.[0]?.address ?? "",
+    });
+  }
+
+  if (adaylar.length === 0) return { tasinan: 0, uidler: [] };
+
+  const skorlar = await spamSkorla(adaylar.map((a) => a.metin));
+
+  const tasinacak: Array<{ uid: number; konu: string; skor: number }> = [];
+  for (let i = 0; i < adaylar.length; i += 1) {
+    const aday = adaylar[i];
+    const onSkor = skorlar[i]?.skor ?? 0;
+    if (!aday || onSkor < TASIMA_ESIGI) continue;
+
+    /**
+     * TAŞIMADAN ÖNCE TAM GÖVDEYLE YENİDEN ÖLÇ.
+     *
+     * Ön eleme `konu + önizleme` ile yapılıyor; önizleme bazı maillerde
+     * boş kalıyor (iç içe multipart, tuhaf bodyStructure) ve o zaman
+     * karar neredeyse yalnızca KONUYA dayanıyor. Model konu+gövde ile
+     * eğitildi, tek başına konu güvenilmez.
+     *
+     * 2026-08-22'de gerçekten oldu: Gmail'in yönlendirme onay maili
+     * ön elemede %90 aldı ve Spam'e taşındı; tam gövdeyle skoru %0'dı.
+     * Kullanıcı onu bulamayabilirdi.
+     *
+     * Taşıma en ağır karar, o yüzden en pahalı ölçümü hak ediyor.
+     * Yalnızca eşiği geçen AZ sayıda mail için tam gövde çekiliyor.
+     */
+    const { skor, dil } = await tamGovdeSkoru(client, aday.uid, aday.konu, onSkor);
+    if (skor < TASIMA_ESIGI) continue;
+
+    /**
+     * İNGİLİZCE MODEL MAİL TAŞIYAMAZ.
+     *
+     * Türkçe model kendi verisiyle yeniden eğitildi (%97) ama İngilizce
+     * model hâlâ eski: SMS spam'iyle eğitilmiş ve gerçek e-postada her
+     * şeye spam diyor (ölçüldü: GitHub uyarısı, Vercel faturası, kargo
+     * bildirimi — üçü de spam). Bu modele mail taşıtmak, kullanıcının
+     * postasını kaybettirmek demek.
+     *
+     * 2026-08-22'de gerçekten oldu: Gmail'in yönlendirme onay maili
+     * İngilizce konusu yüzünden bu modelden %90 alıp Spam'e taşındı.
+     *
+     * Rozet göstermeye devam ediyor (zararsız), ama taşıma ve bildirim
+     * bastırma gibi SONUÇ DOĞURAN kararları veremiyor. İngilizce model
+     * gerçek veriyle yeniden eğitilince bu kısıt kalkar.
+     */
+    if (dil === "en") continue;
+
+    // Doğrulanmış gönderen (BIMI+VMC) asla taşınmaz: markasını sertifika
+    // otoritesine doğrulatmış ve DMARC'ı zorlamada olan bir kurumdan
+    // geliyorsa, model ne derse desin gelen kutusunda kalır.
+    const avatar = aday.adres ? await avatarGetir(aday.adres).catch(() => null) : null;
+    if (avatar?.verified) continue;
+
+    tasinacak.push({ uid: aday.uid, konu: aday.konu, skor });
+  }
+
+  if (tasinacak.length === 0) return { tasinan: 0, uidler: [] };
+
+  await client.messageMove(
+    { uid: tasinacak.map((t) => t.uid).join(",") },
+    spamKutusu,
+    { uid: true },
+  );
+
+  // Neyin nereye gittiği bulunabilsin: konu ve skor kayda giriyor.
+  await audit({
+    userId,
+    action: "spam.moved",
+    detail: tasinacak
+      .map((t) => `%${Math.round(t.skor * 100)} ${t.konu.slice(0, 60)}`)
+      .join(" | "),
+  });
+
+  return { tasinan: tasinacak.length, uidler: tasinacak.map((t) => t.uid) };
+}
+
+/**
+ * Bir mailin tam gövdesiyle spam skorunu yeniden hesaplar.
+ *
+ * Gövde okunamazsa ön skor korunuyor — ölçemediğimiz için kararı
+ * değiştirmek doğru olmaz, ama en azından bilgi kaybı olmuyor.
+ */
+async function tamGovdeSkoru(
+  client: ImapFlow,
+  uid: number,
+  konu: string,
+  onSkor: number,
+): Promise<{ skor: number; dil: "tr" | "en" }> {
+  try {
+    const msg = await client.fetchOne(String(uid), { uid: true, source: true }, { uid: true });
+    if (!msg || !msg.source) return { skor: onSkor, dil: "tr" };
+
+    const parsed = await simpleParser(msg.source);
+    const duz = htmlToOnizleme(parsed.html || parsed.text || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!duz) return { skor: onSkor, dil: "tr" };
+
+    const [yeni] = await spamSkorla([`${konu} ${duz}`.slice(0, 4000)]);
+    return { skor: yeni?.skor ?? onSkor, dil: yeni?.model ?? "tr" };
+  } catch {
+    return { skor: onSkor, dil: "tr" };
+  }
+}
+
+/**
+ * Spam kutusundaki süresi dolmuş mailleri ÇÖP'E taşır.
+ *
+ * > [!note] Kalıcı silme yapılmıyor — bilerek
+ * > "Temizlensin" isteği Çöp'e taşıyarak karşılanıyor, EXPUNGE ile değil.
+ * > Model yanılabildiği için spam'e düşmüş gerçek bir mailin kalıcı olarak
+ * > yok olması kabul edilebilir bir sonuç değil. Çöp'ten geri alınabilir;
+ * > Çöp'ün kendi temizliği Dovecot tarafında ayarlanabilir.
+ */
+async function eskiSpamiTemizle(
+  client: ImapFlow,
+  spamKutusu: string,
+  copKutusu: string,
+  userId: number,
+): Promise<number> {
+  if (!(SPAM_OMRU_GUN > 0) || spamKutusu === copKutusu) return 0;
+
+  const sinir = new Date(Date.now() - SPAM_OMRU_GUN * 24 * 60 * 60 * 1000);
+  // imapflow arama başarısız olursa `false` döndürüyor, dizi değil
+  const bulunan = await client.search({ before: sinir }, { uid: true });
+  const uidler = Array.isArray(bulunan) ? bulunan : [];
+  if (uidler.length === 0) return 0;
+
+  await client.messageMove({ uid: uidler.join(",") }, copKutusu, { uid: true });
+
+  await audit({
+    userId,
+    action: "spam.expired",
+    detail: `${uidler.length} mail (${SPAM_OMRU_GUN} günden eski) Çöp'e taşındı`,
+  });
+
+  return uidler.length;
+}
+
+/**
+ * Bakımı çalıştırır. Kilit ÇAĞIRANDA olmamalı — bu fonksiyon kendi
+ * kutu kilitlerini alıyor.
+ */
+export async function bakimYap(
+  client: ImapFlow,
+  userId: number,
+  kullanici: string,
+): Promise<BakimSonucu> {
+  const son = sonCalisma.get(kullanici) ?? 0;
+  if (Date.now() - son < ARALIK_MS) return BOS;
+  sonCalisma.set(kullanici, Date.now());
+
+  try {
+    const spamKutusu = await kutuBul(client, "\\Junk", ["Junk", "Spam"]);
+    if (!spamKutusu) return BOS;
+
+    let tasinan = 0;
+    const inboxKilit = await client.getMailboxLock("INBOX");
+    try {
+      ({ tasinan } = await spameTasi(client, spamKutusu, userId));
+    } finally {
+      inboxKilit.release();
+    }
+
+    let temizlenen = 0;
+    const copKutusu = await kutuBul(client, "\\Trash", ["Trash", "Çöp", "Deleted Messages"]);
+    if (copKutusu) {
+      const spamKilit = await client.getMailboxLock(spamKutusu);
+      try {
+        temizlenen = await eskiSpamiTemizle(client, spamKutusu, copKutusu, userId);
+      } finally {
+        spamKilit.release();
+      }
+    }
+
+    return { tasinan, temizlenen };
+  } catch {
+    // Bakım bir ek hizmet; başarısız olursa mail listesi yine dönmeli.
+    return BOS;
+  }
+}

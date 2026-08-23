@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx src/mail/sanitize.test.ts && tsx src/lib/crypto.test.ts",
+    "test": "tsx src/mail/sanitize.test.ts && tsx src/mail/mime.test.ts && tsx src/mail/avatar.test.ts && tsx src/mail/spam.test.ts && tsx src/lib/crypto.test.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
@@ -17,25 +17,34 @@
     "@fastify/helmet": "^13.1.0",
     "@fastify/rate-limit": "^11.2.0",
     "@simplewebauthn/server": "^13.3.2",
+    "@types/mailparser": "^3.4.6",
     "argon2": "^0.45.1",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.12.0",
     "imapflow": "^1.7.1",
     "ioredis": "^6.0.0",
+    "mailparser": "^3.9.15",
     "nodemailer": "^9.0.5",
+    "onnxruntime-node": "^1.27.0",
     "otplib": "^13.4.1",
     "pino": "^10.3.1",
     "pino-pretty": "^13.1.3",
     "postgres": "^3.4.9",
     "sanitize-html": "^2.17.7",
+    "web-push": "^3.6.7",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/nodemailer": "^8.0.1",
     "@types/sanitize-html": "^2.16.1",
+    "@types/web-push": "^3.6.4",
     "drizzle-kit": "^0.31.10",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2"
+  },
+  "overrides": {
+    "deepmerge-ts": ">=8.0.0",
+    "adm-zip": ">=0.6.0"
   }
 }

@@ -1,54 +1,92 @@
 # Aktaş Mail
 
-`mail.akts.tr` üzerinde çalışacak, Gmail benzeri arayüzü olan, güvenlik
-odaklı e-posta uygulaması. Web + Android (Capacitor).
+`mail.akts.tr` üzerinde çalışan, kendi sunucusunda barınan e-posta uygulaması.
+Gmail benzeri arayüz, passkey ile parolasız giriş, anlık bildirim ve Türkçe
+spam sınıflandırma. **Web + Android (Capacitor).**
 
-Tasarım ve güvenlik gerekçeleri Obsidian kasasında: `wiki/entities/aktas-mail.md`.
+[![canlı](https://img.shields.io/badge/mail.akts.tr-canlı-1a73e8?style=flat-square)](https://mail.akts.tr)
+![test](https://img.shields.io/badge/test-71%20geçiyor-2ea043?style=flat-square)
+![lisans](https://img.shields.io/badge/lisans-MIT-blue?style=flat-square)
 
-## Verilen kararlar
+## Neden ilginç
 
-| Konu | Karar |
-|---|---|
-| Domain | `mail.akts.tr` — tek isim. Cloudflare kalkanı yok, fail2ban + rate limit zorunlu |
-| Parola | **Tek parola.** Doğrulamayı Dovecot yapar; uygulamanın kendi parolası yok |
-| 2. faktör | Kullanıcı seçer: **TOTP**, **passkey** ya da **güvenilen cihaz** ("HWID") |
-| Kapsam | Önce tek kullanıcı; onaylı kayıt Faz 3'te |
-| Mobil | Cihaz bağlama sayesinde **çıkış yapana kadar** oturum açık kalır |
+### Uygulama IMAP parolanı saklamıyor
 
-## Durum — Faz 1 ✅
+Girişte rastgele bir **oturum anahtarı** üretiliyor; posta parolası onunla
+şifrelenip veritabanına yazılıyor ve anahtar yalnızca istemciye gidiyor
+(`httpOnly` çerez). Sunucu her istekte anahtarı alıyor, kullanıyor, atıyor.
+Veritabanı tek başına çalınırsa posta parolası çözülemiyor.
 
-Kod yazıldı **ve canlı altyapıya karşı çalıştırıldı.**
+Bunun mimari bir bedeli var ve her şeyi şekillendirdi: **sunucu, kullanıcı
+istekte bulunmadan posta kutusuna bakamıyor.** Arka planda yoklama yapısal
+olarak imkânsız.
 
-| Parça | Durum |
-|---|---|
-| Env doğrulama (Zod) | ✅ |
-| PostgreSQL rolü + veritabanı | ✅ sunucuda `aktasmail`, 7 tablo |
-| Drizzle şeması push | ✅ |
-| Gelen HTML sanitizer | ✅ 16/16 saldırı testi |
-| Oturum anahtarı şifrelemesi | ✅ 23/23 test |
-| IMAP katmanı | ✅ **canlı Dovecot'a karşı doğrulandı** |
-| İki aşamalı giriş + TOTP/cihaz/kurtarma | ✅ |
-| Passkey + PRF parolasız giriş | ✅ uçlar çalışıyor |
-| Refresh rotasyonu + reuse detection | ✅ |
-| Redis rate limit | ✅ **429 ve Redis sayacı doğrulandı** |
-| CSP + güvenlik başlıkları | ✅ |
-| Audit log | ✅ **Postgres'e yazdığı görüldü** |
-| fail2ban + ufw (sunucu) | ✅ |
+### Bildirimler teslimat tarafından tetikleniyor
 
-**Faz 1'den kalan, dağıtım zamanına ait iki madde:**
-- Uygulama için ayrı sistem kullanıcısı (şu an her şey root)
-- nginx `limit_req` / `limit_conn`
-
-Bunlar uygulama sunucuya kurulurken yapılacak; şu an sadece yerelde
-tünel üzerinden çalışıyor.
-
-### Doğrulanan uçtan uca akış
+Yoklama mümkün olmadığı için bildirim zinciri şöyle:
 
 ```
-POST /api/auth/login  {"email":"eymen@akts.tr","password":"yanlis"}
-  → Dovecot'a gerçek bağlantı → 401 "E-posta veya parola hatalı"
-  → audit_log'a login.fail satırı düştü
+Postfix/Dovecot teslim eder
+   → maildir-izleyici (inotify) yeni dosyayı yakalar
+   → yalnızca From/Subject okur, yerel kancaya POST atar
+   → web-push ile kayıtlı tüm cihazlara gider
 ```
+
+Ölçüldü: **teslimattan bildirime 549 ms.** Bildirim yükünde gövde yok.
+
+> Önce Dovecot'un kendi `push_notification` eklentisi denendi; OX sürücüsü
+> hedefi kullanıcı meta verisinden okuduğu için çalışmadı. Posta teslimatına
+> dokunan bir yapılandırmayı çalışmadığı hâlde bırakmak doğru olmadığından
+> geri alındı.
+
+### Gönderen doğrulama — mavi tik neye dayanıyor
+
+İki kademe var ve güvenceleri farklı:
+
+| kaynak | anlamı |
+|---|---|
+| **BIMI + VMC** | Markayı bir sertifika otoritesi doğrulamış. Logo gösteriliyor. |
+| **DMARC `p=reject`** | Domain taklit edilemiyor. Kime ait olduğu doğrulanmamış. |
+
+Bu kural `google.com`'a tik veriyor (`p=reject`) ama `gmail.com`'a vermiyor
+(`p=none`) — ayrım kendiliğinden çıkıyor, istisna yazmaya gerek kalmıyor.
+
+### Gelen HTML en büyük saldırı yüzeyi
+
+Bir mail istemcisinde asıl tehlike SQL injection değil, **her gelen mailin
+saldırganın yazdığı HTML olması.**
+
+- Sunucuda `sanitize-html` ile allow-list — **16/16 saldırı testi**
+- İstemcide `sandbox` iframe, `allow-scripts` **yok**
+- Uzak görseller varsayılan kapalı (takip pikseli)
+- Spam ihtimali %20'yi geçerse görseller hiç açılmıyor
+
+### Türkçe MIME gerçekten zor
+
+Gelen Türkçe maillerin hepsi bozuk görünüyordu: `Doğrulama` yerine `DoÄrulama`.
+Sebep, elle yazılmış ayrıştırıcının quoted-printable'ı **bayt değil karakter**
+olarak çözmesiydi — UTF-8'de "ğ" iki bayttır. `mailparser`'a geçildi; eski
+Türkçe maillerin `ISO-8859-9` kodlaması da böylece çalıştı.
+
+## Spam sınıflandırma
+
+Model ayrı depoda: **[turkce-spam-modeli](https://github.com/eymenaktas/turkce-spam-modeli)**
+— %97 doğruluk, ONNX, kendi gelen kutusu verisiyle eğitildi.
+
+Üç kademeli davranış:
+
+| skor | ne oluyor |
+|---|---|
+| %20 üstü | uzak görseller açılmıyor |
+| %50 üstü | listede `spam? %62` rozeti, bildirim gitmiyor |
+| %70 üstü | Spam klasörüne taşınıyor |
+
+Taşıma en ağır karar olduğu için dört emniyeti var: yalnızca okunmamış,
+yıldızsız ve doğrulanmamış göndereninden gelen mailler taşınıyor, her taşıma
+denetim kaydına yazılıyor. Taşımadan önce **tam gövdeyle yeniden ölçülüyor** —
+konu tek başına güvenilmez bir sinyal.
+
+## Kurulum
 
 ## Nasıl çalışıyor
 

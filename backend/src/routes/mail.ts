@@ -2,9 +2,18 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { unpackSessionCookie } from "../lib/crypto.js";
 import { loadSession } from "../auth/session.js";
-import { listMailboxes, listMessages, getMessage, setFlag, searchMessages } from "../mail/imap.js";
+import {
+  listMailboxes,
+  listMessages,
+  getMessage,
+  setFlag,
+  searchMessages,
+  tumunuOkunduYap,
+  okunmamisSayilari,
+} from "../mail/imap.js";
 import { sendMail } from "../mail/send.js";
 import { audit } from "../lib/audit.js";
+import { avatarlariGetir } from "../mail/avatar-cache.js";
 import { SESSION_COOKIE } from "./auth.js";
 
 /** Oturumu çözer; yoksa 401. Her posta rotasının ilk adımı. */
@@ -49,11 +58,13 @@ export async function mailRoutes(app: FastifyInstance): Promise<void> {
 
     if (!query.success) return reply.code(400).send({ error: "Geçersiz sorgu" });
 
-    const messages = await listMessages(
+    const sonuc = await listMessages(
       { user: session.email, pass: session.imapPassword },
-      { mailbox: query.data.mailbox, limit: query.data.limit },
+      { mailbox: query.data.mailbox, limit: query.data.limit, userId: session.userId },
     );
-    return reply.send({ messages });
+    // `bakim`: bu istekte spam'e taşınan / Çöp'e temizlenen sayıları.
+    // Arayüz bunu kısa bir bilgi olarak gösteriyor.
+    return reply.send({ messages: sonuc.messages, bakim: sonuc.bakim });
   });
 
   /**
@@ -210,5 +221,65 @@ export async function mailRoutes(app: FastifyInstance): Promise<void> {
     });
 
     return reply.send({ status: "ok" });
+  });
+
+  /**
+   * Gönderen avatarları (BIMI) — bir liste için toplu.
+   *
+   * Ayrı bir uç: mail listesi hızlı dönmeli, DNS + HTTP aramaları onu
+   * bekletmemeli. Arayüz önce listeyi basar, avatarlar sonra düşer.
+   */
+  app.post("/api/sender-avatars", async (req, reply) => {
+    const session = await requireSession(req, reply);
+    if (!session) return;
+
+    const govde = z
+      .object({ addresses: z.array(z.string().email()).max(100) })
+      .safeParse(req.body);
+    if (!govde.success) return reply.code(400).send({ error: "Geçersiz adres listesi" });
+
+    const avatarlar = await avatarlariGetir(govde.data.addresses);
+    return reply.send({ avatars: avatarlar });
+  });
+
+  /** Klasördeki tüm okunmamışları okundu yap. */
+  app.post("/api/messages/read-all", async (req, reply) => {
+    const session = await requireSession(req, reply);
+    if (!session) return;
+
+    const govde = z
+      .object({ mailbox: z.string().max(255).default("INBOX") })
+      .safeParse(req.body ?? {});
+    if (!govde.success) return reply.code(400).send({ error: "Geçersiz istek" });
+
+    const adet = await tumunuOkunduYap(
+      { user: session.email, pass: session.imapPassword },
+      govde.data.mailbox,
+    );
+
+    await audit({
+      userId: session.userId,
+      action: "mail.read_all",
+      detail: `${adet} mesaj (${govde.data.mailbox})`,
+      ip: req.ip,
+    });
+    return reply.send({ okunan: adet });
+  });
+
+  /**
+   * Klasör başına okunmamış sayısı — kenar çubuğundaki rozetler.
+   *
+   * Mail listesinden AYRI: IMAP STATUS kutuyu açmadan sayıyı veriyor,
+   * yani her klasörün tüm mesajlarını çekmeye gerek yok.
+   */
+  app.get("/api/unread-counts", async (req, reply) => {
+    const session = await requireSession(req, reply);
+    if (!session) return;
+
+    const sayilar = await okunmamisSayilari({
+      user: session.email,
+      pass: session.imapPassword,
+    });
+    return reply.send({ counts: sayilar });
   });
 }

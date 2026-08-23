@@ -19,6 +19,16 @@
   --surface-active: #d3e3fd; /* seçili */
   --read-bg: #f2f6fc; /* okunmuş satır */
 
+  /* Deneysel spam rozeti — uyarı rengi, hata rengi değil:
+     model yanılıyor, kesin bir iddia gibi görünmemeli */
+  --spam-fg: #b3730f;
+  --spam-bg: rgba(208, 138, 44, 0.1);
+  --spam-line: #e0b070;
+
+  /* Doğrulanmış gönderen (BIMI+VMC) */
+  --tik-bg: rgba(26, 115, 232, 0.08);
+  --tik-line: #a8c7fa;
+
   --fg: #1f1f1f;
   --muted: #5f6368;
   --dim: #80868b;
@@ -60,6 +70,13 @@
   --surface-active: #004a77;
   --read-bg: #1a1a1a;
 
+  --spam-fg: #e0a94f;
+  --spam-bg: rgba(224, 169, 79, 0.12);
+  --spam-line: #7a5a25;
+
+  --tik-bg: rgba(138, 180, 248, 0.12);
+  --tik-line: #3c5a80;
+
   --fg: #e3e3e3;
   --muted: #9aa0a6;
   --dim: #80868b;
@@ -85,10 +102,30 @@
   padding: 0;
 }
 
+/*
+  UYGULAMA KABUĞU SABİT — sayfa hiç kaymaz.
+
+  Kaydırılan tek yer mesaj listesi (`.rows`) ve mail gövdesi. Kabuk
+  kayarsa üst çubuk, arama ve klasörler ekrandan çıkıyor; bir mail
+  istemcisinde bunlar hep el altında olmalı.
+
+  `100dvh`: telefon tarayıcılarında `100%`/`100vh` adres çubuğunun
+  kapladığı alanı da sayıyor, o yüzden ekranın altı (çekmecedeki
+  "Ayarlar" gibi) kesiliyordu. `dvh` görünen alanı takip ediyor.
+  Eski tarayıcılar için önce `100%` yazılıyor.
+*/
 html,
 body,
 #root {
   height: 100%;
+  height: 100dvh;
+}
+
+html,
+body {
+  overflow: hidden;
+  /* Kabuğun kenarında lastik gibi esneme olmasın (iOS) */
+  overscroll-behavior: none;
 }
 
 body {

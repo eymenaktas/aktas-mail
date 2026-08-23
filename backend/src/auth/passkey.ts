@@ -56,6 +56,18 @@ export async function passkeyRegistrationOptions(userId: number, email: string) 
     // Aynı authenticator'a ikinci kez kaydolmayı engelle
     excludeCredentials: existing.map((c) => ({ id: c.credentialId })),
     authenticatorSelection: {
+      /**
+       * CİHAZIN KENDİ doğrulayıcısı — Mac'te Touch ID, iPhone'da Face ID.
+       *
+       * Bu alan boş bırakılınca Chrome macOS'ta "telefonunla kaydet"
+       * (hibrit/QR) akışını öne çıkarıyordu; kullanıcı Mac'te
+       * Touch ID'yi hiç göremiyordu (2026-08-22).
+       *
+       * Bedeli: harici güvenlik anahtarı (YubiKey gibi) kaydedilemiyor.
+       * Passkey'ler zaten iCloud/Google hesabıyla senkronlandığı için
+       * cihaz başına kayıt daha doğru bir model.
+       */
+      authenticatorAttachment: "platform",
       residentKey: "required", // discoverable: e-posta yazmadan giriş
       userVerification: "required", // biyometrik/PIN şart
     },

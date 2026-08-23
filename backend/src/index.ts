@@ -9,6 +9,10 @@ import { authRoutes } from "./routes/auth.js";
 import { mailRoutes } from "./routes/mail.js";
 import { passkeyRoutes } from "./routes/passkey.js";
 import { adminRoutes } from "./routes/admin.js";
+import { profileRoutes } from "./routes/profile.js";
+import { pushRoutes } from "./routes/push.js";
+import { eventRoutes } from "./routes/events.js";
+import { spamRoutes } from "./routes/spam.js";
 import { closeDb } from "./db/index.js";
 
 /**
@@ -119,6 +123,10 @@ await app.register(authRoutes);
 await app.register(passkeyRoutes);
 await app.register(mailRoutes);
 await app.register(adminRoutes);
+await app.register(profileRoutes);
+await app.register(pushRoutes);
+await app.register(eventRoutes);
+await app.register(spamRoutes);
 
 // Hata gövdesinde yığın izi sızmasın
 app.setErrorHandler((error: unknown, req, reply) => {

@@ -52,6 +52,13 @@ export interface Address {
   address: string;
 }
 
+/** ML kampı Gün 1 modelinin spam tavsiyesi. DENEYSEL — bkz. backend/src/mail/spam.ts */
+export interface SpamSonucu {
+  spam: boolean;
+  skor: number;
+  model: "tr" | "en";
+}
+
 export interface MessageSummary {
   uid: number;
   seq: number;
@@ -62,6 +69,36 @@ export interface MessageSummary {
   seen: boolean;
   flagged: boolean;
   hasAttachments: boolean;
+  spam?: SpamSonucu;
+}
+
+/** Gönderen avatarı: BIMI logosu (mavi tikli) ya da Gravatar fotoğrafı. */
+export interface SenderAvatar {
+  image: string | null;
+  /** VMC doğrulanmış marka — mavi tik */
+  verified: boolean;
+  source: "bimi" | "dmarc" | "gravatar" | "none";
+}
+
+export interface Attachment {
+  filename: string;
+  contentType: string;
+  size: number;
+}
+
+/** Cihazdan bağımsız tercihler — hesapta saklanıyor. */
+export interface Ayarlar {
+  tema?: "light" | "dark";
+  arkaplan?: string;
+  desen?: string;
+  okumaTemasi?: "auto" | "light" | "dark";
+}
+
+export interface Profile {
+  email: string;
+  displayName: string | null;
+  avatar: string | null;
+  settings: Ayarlar | null;
 }
 
 export interface MessageDetail extends MessageSummary {
@@ -70,6 +107,13 @@ export interface MessageDetail extends MessageSummary {
   html: string;
   blockedImages: number;
   externalLinks: number;
+  attachments: Attachment[];
+  /** Gövdeye gömülü (cid:) görseller — uzak görselden farklı, takip riski yok */
+  inlineImages: number;
+  /** BIMI + VMC doğrulanmış gönderen (mavi tik) — uzak görselleri otomatik açılır */
+  senderVerified: boolean;
+  /** Uzak görseller spam şüphesi (%20 üstü) yüzünden engellendiyse true */
+  gorselSpamNedeniyle: boolean;
 }
 
 export interface Mailbox {
@@ -77,6 +121,38 @@ export interface Mailbox {
   name: string;
   specialUse: string | null;
   subscribed: boolean;
+  /** Okunmamış mail sayısı (IMAP STATUS) */
+  unseen: number;
+}
+
+/** Bir listeleme isteğinde yapılan bakım */
+export interface Bakim {
+  tasinan: number;
+  temizlenen: number;
+}
+
+export interface ModelDil {
+  normalize: boolean;
+  surum?: string;
+  algoritma?: string;
+  dogruluk?: number;
+  /** Spam sınıfının F1'i — dengesiz veride doğruluktan çok daha anlamlı */
+  f1?: number;
+  kesinlik?: number;
+  duyarlilik?: number;
+  onceki_dogruluk?: number;
+  ornek_sayisi?: number;
+  denge?: { ham: number; spam: number };
+  kaynaklar?: Array<{ ad: string; adet: number; not?: string }>;
+  guclu?: string[];
+  zayif?: string[];
+}
+
+export interface SpamIstatistik {
+  toplam: number;
+  etiketler: Array<{ label: string; adet: number }>;
+  modelDogrulugu: number | null;
+  yeterliMi: boolean;
 }
 
 export interface Passkey {
@@ -212,10 +288,44 @@ export const api = {
 
   mailboxes: () => request<{ mailboxes: Mailbox[] }>("/api/mailboxes"),
 
+  /** Klasör başına okunmamış sayısı (IMAP STATUS — kutuyu açmadan) */
+  unreadCounts: () => request<{ counts: Record<string, number> }>("/api/unread-counts"),
+
+  readAll: (mailbox: string) =>
+    request<{ okunan: number }>("/api/messages/read-all", {
+      method: "POST",
+      body: JSON.stringify({ mailbox }),
+    }),
+
   messages: (mailbox = "INBOX", limit = 30) =>
-    request<{ messages: MessageSummary[] }>(
+    request<{ messages: MessageSummary[]; bakim: Bakim }>(
       `/api/messages?mailbox=${encodeURIComponent(mailbox)}&limit=${limit}`,
     ),
+
+  /** Bir maili spam / spam değil diye işaretle — model eğitimi için veri */
+  spamLabel: (uid: number, mailbox: string, label: "spam" | "ham") =>
+    request<{
+      ok: boolean;
+      label: string;
+      modelSkoru: number | null;
+      /** Mail taşındıysa hedef kutu, taşınmadıysa null */
+      tasindi: string | null;
+    }>("/api/spam/label", {
+      method: "POST",
+      body: JSON.stringify({ uid, mailbox, label }),
+    }),
+
+  /** Bu maile daha önce verilmiş etiket (yoksa null) */
+  spamLabelGet: (uid: number, mailbox: string) =>
+    request<{ label: "spam" | "ham" | null }>(
+      `/api/spam/label?uid=${uid}&mailbox=${encodeURIComponent(mailbox)}`,
+    ),
+
+  spamStats: () => request<SpamIstatistik>("/api/spam/stats"),
+
+  /** Modelin künyesi: eğitim verisi, doğruluk, bilinen zayıflıklar */
+  spamModel: () =>
+    request<{ model: Record<string, ModelDil> | null }>("/api/spam/model"),
 
   /** Sunucu tarafı arama — kutunun tamamını tarar (IMAP SEARCH). */
   search: (q: string, mailbox = "INBOX", limit = 50) =>
@@ -227,6 +337,51 @@ export const api = {
     request<{ message: MessageDetail }>(
       `/api/messages/${uid}?mailbox=${encodeURIComponent(mailbox)}&images=${images}`,
     ),
+
+  /**
+   * Gönderen avatarları — ayrı çağrı, çünkü DNS + HTTP aramaları
+   * mail listesini bekletmemeli. Liste önce basılır, avatarlar sonra düşer.
+   */
+  senderAvatars: (addresses: string[]) =>
+    request<{ avatars: Record<string, SenderAvatar> }>("/api/sender-avatars", {
+      method: "POST",
+      body: JSON.stringify({ addresses }),
+    }),
+
+  profile: () => request<{ profile: Profile | null }>("/api/profile"),
+
+  // ── Bildirimler ───────────────────────────────────────────
+  pushKey: () => request<{ key: string }>("/api/push/key"),
+  pushDevices: () =>
+    request<{ devices: Array<{ endpoint: string; label: string | null; createdAt: string; lastSentAt: string | null }>; hazir: boolean }>(
+      "/api/push/devices",
+    ),
+  pushSubscribe: (sub: unknown, label: string) =>
+    request<{ ok: boolean }>("/api/push/subscribe", {
+      method: "POST",
+      body: JSON.stringify({ ...(sub as Record<string, unknown>), label }),
+    }),
+  pushUnsubscribe: (endpoint: string) =>
+    request<{ ok: boolean }>("/api/push/subscribe", {
+      method: "DELETE",
+      body: JSON.stringify({ endpoint }),
+    }),
+  pushTest: () => request<{ gonderilen: number; temizlenen: number }>("/api/push/test", { method: "POST" }),
+
+  /** Kısmi güncelleme: yalnızca gönderilen alanlar değişir. */
+  saveSettings: (ayarlar: Ayarlar) =>
+    request<{ settings: Ayarlar }>("/api/profile/settings", {
+      method: "PUT",
+      body: JSON.stringify(ayarlar),
+    }),
+
+  setAvatar: (avatar: string) =>
+    request<{ ok: boolean }>("/api/profile/avatar", {
+      method: "POST",
+      body: JSON.stringify({ avatar }),
+    }),
+
+  clearAvatar: () => request<{ ok: boolean }>("/api/profile/avatar", { method: "DELETE" }),
 
   setFlag: (uid: number, flag: "seen" | "flagged", value: boolean, mailbox = "INBOX") =>
     request<{ status: string }>(`/api/messages/${uid}/flags`, {

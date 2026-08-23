@@ -60,6 +60,15 @@ const schema = z.object({
   ADMIN_EMAIL: z.string().email().default("eymen@akts.tr"),
   // Tarayıcı arayüzünün origin'i — CORS ve çerez kapsamı için
   APP_ORIGIN: z.string().url().default("https://mail.akts.tr"),
+
+  /**
+   * Web push (VAPID) anahtarları. Boşsa bildirim özelliği kapalı kalır —
+   * uygulama yine çalışır, yalnızca abonelik uçları 503 döner.
+   */
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  /** Teslimat kancasının kullandığı paylaşılan sır (localhost + bu sır) */
+  PUSH_HOOK_SECRET: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

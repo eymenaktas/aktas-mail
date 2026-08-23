@@ -2,8 +2,12 @@ import { useEffect, useState } from "react";
 import { api, ApiError, type Passkey } from "../lib/api.js";
 import { passkeyRegister, wrapPassword, prfSupported } from "../lib/passkey.js";
 import { AdminUsers } from "./AdminUsers.js";
+import { ProfilePhoto } from "./ProfilePhoto.js";
+import { Bildirimler } from "./Bildirimler.js";
+import { Appearance } from "./Appearance.js";
+import { SpamEgitim } from "./SpamEgitim.js";
 
-type Sekme = "passkey" | "kullanicilar";
+type Sekme = "profil" | "gorunum" | "bildirim" | "spam" | "passkey" | "kullanicilar";
 type Adim = "liste" | "parola" | "kaydediliyor";
 
 /**
@@ -26,7 +30,7 @@ export function Settings({
   domain: string;
   onClose: () => void;
 }) {
-  const [sekme, setSekme] = useState<Sekme>("passkey");
+  const [sekme, setSekme] = useState<Sekme>("profil");
 
   const [passkeys, setPasskeys] = useState<Passkey[]>([]);
   const [adim, setAdim] = useState<Adim>("liste");
@@ -94,6 +98,40 @@ export function Settings({
         <div className="sekmeler" role="tablist">
           <button
             role="tab"
+            aria-selected={sekme === "profil"}
+            className={`sekme ${sekme === "profil" ? "is-active" : ""}`}
+            onClick={() => setSekme("profil")}
+          >
+            Profil
+          </button>
+          <button
+            role="tab"
+            aria-selected={sekme === "gorunum"}
+            className={`sekme ${sekme === "gorunum" ? "is-active" : ""}`}
+            onClick={() => setSekme("gorunum")}
+          >
+            Görünüm
+          </button>
+          {isAdmin && (
+          <button
+            role="tab"
+            aria-selected={sekme === "spam"}
+            className={`sekme ${sekme === "spam" ? "is-active" : ""}`}
+            onClick={() => setSekme("spam")}
+          >
+            Spam modeli
+          </button>
+          )}
+          <button
+            role="tab"
+            aria-selected={sekme === "bildirim"}
+            className={`sekme ${sekme === "bildirim" ? "is-active" : ""}`}
+            onClick={() => setSekme("bildirim")}
+          >
+            Bildirimler
+          </button>
+          <button
+            role="tab"
             aria-selected={sekme === "passkey"}
             className={`sekme ${sekme === "passkey" ? "is-active" : ""}`}
             onClick={() => setSekme("passkey")}
@@ -113,6 +151,34 @@ export function Settings({
         </div>
 
         <div className="modal-body">
+          {sekme === "profil" && (
+            <>
+              <h3>Profil fotoğrafı</h3>
+              <ProfilePhoto email={email} />
+            </>
+          )}
+
+          {sekme === "gorunum" && (
+            <>
+              <h3>Arka plan teması</h3>
+              <Appearance />
+            </>
+          )}
+
+          {sekme === "spam" && isAdmin && (
+            <>
+              <h3>Spam modeli eğitimi</h3>
+              <SpamEgitim />
+            </>
+          )}
+
+          {sekme === "bildirim" && (
+            <>
+              <h3>Bildirimler</h3>
+              <Bildirimler isAdmin={isAdmin} />
+            </>
+          )}
+
           {sekme === "passkey" && (
             <>
               <h3>Passkey'ler</h3>

@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
-import { api, type Me, type Mailbox, type MessageSummary, type MessageDetail } from "../lib/api.js";
+import { api, type Me, type Mailbox, type MessageSummary, type MessageDetail, type SenderAvatar, type Bakim } from "../lib/api.js";
+import { Avatar } from "./Avatar.js";
+import { PROFIL_DEGISTI } from "./ProfilePhoto.js";
+import { ayarlariUygula } from "../lib/theme.js";
 import { MessageView } from "./MessageView.js";
 import { Compose, type Draft } from "./Compose.js";
 import { Logo } from "./Logo.js";
 import { Settings } from "./Settings.js";
-import { ThemeToggle } from "./ThemeToggle.js";
 
 /** IMAP özel klasörlerini Türkçe adlara ve sıraya çevir. */
 const KLASOR: Record<string, { ad: string; ikon: string; sira: number }> = {
@@ -55,6 +57,44 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [query, setQuery] = useState("");
   const [ayarlar, setAyarlar] = useState(false);
   const [sonuclar, setSonuclar] = useState<MessageSummary[] | null>(null);
+  /** Gönderen adresine göre avatarlar; liste geldikten SONRA dolar. */
+  const [avatarlar, setAvatarlar] = useState<Record<string, SenderAvatar>>({});
+  /** Bu istekte spam'e taşınan / Çöp'e temizlenen sayıları; yoksa null */
+  const [bakim, setBakim] = useState<Bakim | null>(null);
+  /** Kullanıcının kendi profil fotoğrafı (Ayarlar > Profil'den yüklenen) */
+  const [kendiAvatar, setKendiAvatar] = useState<string | null>(null);
+  /** Masaüstünde okuma panelini tam ekrana açar (Gmail'deki gibi) */
+  const [tamEkran, setTamEkran] = useState(false);
+  /** Canlı akıştan "yeni mail" geldiğinde artıyor; listeyi tetikliyor. */
+  const [canliSurum, setCanliSurum] = useState(0);
+  /** Kısa bilgi mesajı (taşıma vb.) — birkaç saniye görünüp kayboluyor. */
+  const [bilgi, setBilgi] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!bilgi) return;
+    const z = setTimeout(() => setBilgi(null), 4000);
+    return () => clearTimeout(z);
+  }, [bilgi]);
+
+  // Profil bir kez okunuyor; Ayarlar'da değiştirilince pencere olayıyla
+  // haberdar oluyoruz (ortak durum yöneticisi kurmaya değmeyecek kadar küçük).
+  useEffect(() => {
+    const yukle = () => {
+      void api
+        .profile()
+        .then((r) => {
+          setKendiAvatar(r.profile?.avatar ?? null);
+          // Hesaptaki tercihler yereli EZER — cihazlar arası tutarlılık
+          // için doğru kaynak sunucu. (Yerel önbellek yalnızca ilk
+          // boyamada beklememek içindi.)
+          ayarlariUygula(r.profile?.settings);
+        })
+        .catch(() => {});
+    };
+    yukle();
+    window.addEventListener(PROFIL_DEGISTI, yukle);
+    return () => window.removeEventListener(PROFIL_DEGISTI, yukle);
+  }, []);
   const [araniyor, setAraniyor] = useState(false);
   /**
    * Telefonda klasör çubuğu ekrana sığmadığı için çekmeceye dönüşüyor.
@@ -71,21 +111,106 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
       .catch((e: Error) => setError(e.message));
   }, []);
 
+  /**
+   * Klasör rozetlerini tazeler.
+   *
+   * Kutu listesi yalnızca açılışta çekiliyordu, bu yüzden bir maili
+   * okuduğunda kenar çubuğundaki sayı olduğu gibi kalıyordu
+   * (2026-08-22'de fark edildi). Ayrı ve ucuz bir uç kullanıyoruz:
+   * IMAP STATUS kutuyu açmadan sayıyı veriyor, tüm mesajları çekmiyor.
+   */
+  const sayaclariTazele = useCallback(() => {
+    void api
+      .unreadCounts()
+      .then((r) => {
+        setBoxes((onceki) =>
+          onceki.map((b) => ({ ...b, unseen: r.counts[b.path] ?? b.unseen })),
+        );
+      })
+      .catch(() => {
+        // Rozet bir süsleme; başarısız olursa eski sayı kalsın
+      });
+  }, []);
+
+  /** Bu klasördeki tüm okunmamışları okundu yap. */
+  const tumunuOku = useCallback(async () => {
+    try {
+      const r = await api.readAll(mailbox);
+      if (r.okunan > 0) {
+        // Listeyi ve rozetleri yeniden çekmek yerine yerelde işaretle:
+        // sunucuda zaten yapıldı, ekranın beklemesine gerek yok.
+        setMessages((m) => m.map((x) => ({ ...x, seen: true })));
+        setSonuclar((m) => (m ? m.map((x) => ({ ...x, seen: true })) : m));
+        sayaclariTazele();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "İşaretlenemedi");
+    }
+  }, [mailbox, sayaclariTazele]);
+
+  /**
+   * Canlı olay akışı — yeni mail geldiği anda liste tazelensin.
+   *
+   * Bildirim zaten anında gidiyordu ama LİSTE sayfa yenilenene kadar
+   * eski kalıyordu. Aynı teslimat kancası artık açık sekmelere de haber
+   * veriyor (SSE); burada onu dinleyip listeyi çekiyoruz.
+   *
+   * Kopan bağlantıyı EventSource kendisi geri kuruyor, o yüzden ayrı
+   * bir yeniden bağlanma mantığı yok.
+   */
+  useEffect(() => {
+    let kaynak: EventSource | null = null;
+    try {
+      kaynak = new EventSource("/api/events");
+    } catch {
+      return; // Tarayıcı desteklemiyorsa sessizce vazgeç
+    }
+
+    kaynak.onmessage = (olay) => {
+      try {
+        const veri = JSON.parse(olay.data) as { tip?: string };
+        if (veri.tip === "yeni-mail") {
+          // Doğrudan `yukle` çağırmak yerine sürüm sayacını artırıyoruz:
+          // `yukle` mailbox'a bağlı ve bu efektin ona bağımlı olması
+          // her klasör değişiminde akışı yeniden kurardı.
+          setCanliSurum((n) => n + 1);
+        }
+      } catch {
+        /* bozuk olay: yoksay */
+      }
+    };
+
+    return () => kaynak?.close();
+  }, []);
+
   const yukle = useCallback(() => {
     setLoading(true);
     setError(null);
+    sayaclariTazele();
     api
       .messages(mailbox, 50)
-      .then((r) => setMessages(r.messages))
+      .then((r) => {
+        setMessages(r.messages);
+        // Bakım bir şey yaptıysa kısa bir bilgi göster, yoksa sessiz kal
+        setBakim(r.bakim && (r.bakim.tasinan || r.bakim.temizlenen) ? r.bakim : null);
+      })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [mailbox]);
+  }, [mailbox, sayaclariTazele]);
 
   useEffect(() => {
     setSelected(null);
     setQuery("");
     yukle();
   }, [yukle]);
+
+  // Canlı akıştan haber gelince listeyi tazele. Seçili mail ve arama
+  // korunuyor — kullanıcının yaptığı iş bölünmesin.
+  useEffect(() => {
+    if (canliSurum === 0) return;
+    yukle();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canliSurum]);
 
   /**
    * Sunucu tarafı arama — kutunun TAMAMINI tarar.
@@ -139,6 +264,7 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
       } else if (e.key === "Escape") {
         // Çekmece açıksa önce onu kapat — Esc en üstteki katmanı kapatmalı
         if (menuAcik) setMenuAcik(false);
+        else if (tamEkran) setTamEkran(false);
         else setSelected(null);
       } else if (e.key === "u") {
         setSelected(null);
@@ -152,22 +278,87 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [yukle, loading, menuAcik]);
+  }, [yukle, loading, menuAcik, tamEkran]);
 
   async function cikis() {
     await api.logout().catch(() => {});
     onLogout();
   }
 
-  function yanitla(msg: MessageDetail) {
+  function yanitla(msg: MessageDetail, hazirMetin?: string) {
     setDraft({
       to: msg.from?.address ?? "",
       subject: msg.subject.startsWith("Re:") ? msg.subject : `Re: ${msg.subject}`,
-      text: `\n\n--- ${msg.from?.name || msg.from?.address} yazdı ---\n`,
+      // Hazır cevap seçildiyse metnin başına konuyor; kullanıcı
+      // göndermeden önce düzenleyebiliyor.
+      text: `${hazirMetin ? `${hazirMetin}\n` : ""}\n\n--- ${
+        msg.from?.name || msg.from?.address
+      } yazdı ---\n`,
+    });
+  }
+
+  /**
+   * İlet. Yanıtla'dan iki farkı var: alıcı BOŞ başlıyor (kime
+   * ileteceğini kullanıcı seçer) ve orijinal mailin başlıkları
+   * gövdeye ekleniyor — ilet edilen mailde "bu kimden geldi"
+   * bilgisi kaybolmamalı.
+   */
+  function ilet(msg: MessageDetail) {
+    const govde = msg.html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    setDraft({
+      to: "",
+      subject: msg.subject.startsWith("Fwd:") ? msg.subject : `Fwd: ${msg.subject}`,
+      text:
+        `\n\n---------- İletilen mesaj ----------\n` +
+        `Kimden: ${msg.from?.name || ""} <${msg.from?.address ?? ""}>\n` +
+        `Tarih: ${msg.date ? new Date(msg.date).toLocaleString("tr-TR") : ""}\n` +
+        `Konu: ${msg.subject}\n` +
+        `Kime: ${msg.to.map((a) => a.address).join(", ")}\n\n` +
+        govde.slice(0, 4000),
     });
   }
 
   const gosterilen = sonuclar ?? messages;
+
+  /**
+   * Avatarları listeden AYRI çekiyoruz.
+   *
+   * BIMI bir DNS sorgusu + logo indirmesi demek; bunu mail listesinin
+   * içine koysaydık liste o aramaları beklerdi. Böylece mailler anında
+   * geliyor, avatarlar birkaç yüz ms sonra yerine oturuyor.
+   *
+   * Zaten bilinen adresler tekrar sorulmuyor — kutu değiştirip geri
+   * geldiğinde ağa çıkılmıyor.
+   */
+  useEffect(() => {
+    const eksik = [
+      ...new Set(
+        gosterilen
+          .map((m) => m.from?.address?.toLowerCase())
+          .filter((a): a is string => !!a && !(a in avatarlar)),
+      ),
+    ];
+    if (eksik.length === 0) return;
+
+    let alive = true;
+    api
+      .senderAvatars(eksik.slice(0, 100))
+      .then((r) => {
+        if (!alive) return;
+        // Bulunamayanları da yazıyoruz ki tekrar tekrar sorulmasın.
+        const yeni: Record<string, SenderAvatar> = {};
+        for (const adres of eksik) {
+          yeni[adres] = r.avatars[adres] ?? { image: null, verified: false, source: "none" };
+        }
+        setAvatarlar((onceki) => ({ ...onceki, ...yeni }));
+      })
+      .catch(() => {
+        // Avatar bir süsleme; başarısız olursa harf avatarında kalırız.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [gosterilen, avatarlar]);
   const yukleniyor = araniyor || loading;
 
   return (
@@ -196,7 +387,9 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {boxes.map((b) => (
             <button
               key={b.path}
-              className={`folder ${b.path === mailbox ? "is-active" : ""}`}
+              className={`folder ${b.path === mailbox ? "is-active" : ""} ${
+                b.unseen > 0 ? "has-unseen" : ""
+              }`}
               onClick={() => {
                 setMailbox(b.path);
                 setMenuAcik(false); // telefonda seçim sonrası çekmece kapansın
@@ -204,20 +397,35 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
             >
               <span className="folder-ico">{kutuIkon(b)}</span>
               <span className="folder-name">{kutuAdi(b)}</span>
+              {/* Okunmamış sayısı — Gmail'de olduğu gibi klasör adı da kalınlaşır */}
+              {b.unseen > 0 && <span className="folder-unseen">{b.unseen}</span>}
             </button>
           ))}
         </nav>
 
         <div className="sidebar-foot">
           <div className="who">
-            <div className="avatar-sm">{me.user.email.charAt(0).toUpperCase()}</div>
+            {kendiAvatar ? (
+              <img className="avatar-sm avatar-sm-img" src={kendiAvatar} alt="" />
+            ) : (
+              <div className="avatar-sm">{me.user.email.charAt(0).toUpperCase()}</div>
+            )}
             <div className="who-text">
               <b>{me.user.displayName ?? me.user.email.split("@")[0]}</b>
               <span>{me.user.email}</span>
             </div>
           </div>
           <div className="foot-actions">
-            <button className="btn-link" onClick={() => setAyarlar(true)}>
+            <button
+              className="btn-link"
+              onClick={() => {
+                // Telefonda çekmece açıkken pencere onun altında kalıyordu;
+                // z-index düzeltildi ama çekmeceyi kapatmak zaten doğru
+                // davranış — pencere açılınca arkada duran menü kalmasın.
+                setMenuAcik(false);
+                setAyarlar(true);
+              }}
+            >
               Ayarlar
             </button>
             <button className="btn-link" onClick={() => void cikis()}>
@@ -259,7 +467,22 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
           <button className="icon-btn" onClick={yukle} title="Yenile (r)" disabled={loading}>
             ↻
           </button>
-          <ThemeToggle />
+
+          {/* Okunmamış varsa göster; hepsi okunmuşsa düğme gereksiz yer kaplar */}
+          {gosterilen.some((m) => !m.seen) && (
+            <button
+              className="icon-btn"
+              onClick={() => void tumunuOku()}
+              title="Tümünü okundu işaretle"
+              aria-label="Tümünü okundu işaretle"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                   strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M1.5 12.5l4 4L13 9" />
+                <path d="M8.5 12.5l4 4L22 7" />
+              </svg>
+            </button>
+          )}
         </div>
 
         {error && <p className="empty">{error}</p>}
@@ -275,6 +498,23 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
           <p className="search-note">{sonuclar.length} sonuç · tüm klasör tarandı</p>
         )}
 
+        {/* Otomatik bakım sessizce yapılmasın — ne olduğu söylensin */}
+        {bakim && (
+          <p className="bakim-note">
+            {bakim.tasinan > 0 && (
+              <>
+                <b>{bakim.tasinan} mail Spam'e taşındı.</b> Model yanılmış
+                olabilir — Spam klasörüne bakıp "Spam değil" diyebilirsin.{" "}
+              </>
+            )}
+
+        {bilgi && <p className="search-note">{bilgi}</p>}
+            {bakim.temizlenen > 0 && (
+              <>{bakim.temizlenen} eski spam Çöp'e taşındı.</>
+            )}
+          </p>
+        )}
+
         <div className="rows">
           {gosterilen.map((m) => (
             <button
@@ -282,23 +522,52 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
               className={`row ${m.seen ? "" : "is-unread"} ${selected === m.uid ? "is-selected" : ""}`}
               onClick={() => setSelected(m.uid)}
             >
-              <div className="row-top">
-                <span className="row-from">
-                  {m.from?.name || m.from?.address || "(bilinmiyor)"}
-                </span>
-                {m.flagged && <span className="row-star">★</span>}
-                {m.hasAttachments && <span className="row-clip">📎</span>}
-                <time className="row-date">{tarih(m.date)}</time>
+              <Avatar
+                name={m.from?.name ?? ""}
+                address={m.from?.address ?? ""}
+                avatar={avatarlar[(m.from?.address ?? "").toLowerCase()]}
+              />
+              <div className="row-body">
+                <div className="row-top">
+                  <span className="row-from">
+                    {m.from?.name || m.from?.address || "(bilinmiyor)"}
+                  </span>
+                  {/*
+                    Rozet KONU yanında değil GÖNDEREN yanında.
+                    Konu satırı uzun olduğunda `text-overflow: ellipsis`
+                    ile kırpılıyor ve rozet görünmez oluyordu; gönderen
+                    satırında ise rozete sabit yer ayrılıyor.
+                  */}
+                  {m.spam?.spam && (
+                    <span
+                      className={`row-spam ${m.spam.skor >= 0.85 ? "is-yuksek" : ""}`}
+                      title={
+                        `Spam ihtimali: %${Math.round(m.spam.skor * 100)} ` +
+                        `(${m.spam.model === "tr" ? "Türkçe" : "İngilizce"} model)\n\n` +
+                        `DENEYSEL — bu model küçük bir veriyle eğitildi ve gerçek ` +
+                        `gelen kutusunda yanılabiliyor. Mail taşınmadı, silinmedi.`
+                      }
+                    >
+                      spam? %{Math.round(m.spam.skor * 100)}
+                    </span>
+                  )}
+                  {m.flagged && <span className="row-star">★</span>}
+                  {m.hasAttachments && <span className="row-clip">📎</span>}
+                  <time className="row-date">{tarih(m.date)}</time>
+                </div>
+                <div className="row-subject">
+                  {m.subject}
+
+                </div>
+                <div className="row-preview">{m.preview}</div>
               </div>
-              <div className="row-subject">{m.subject}</div>
-              <div className="row-preview">{m.preview}</div>
             </button>
           ))}
         </div>
       </section>
 
       {/* ── Sağ: okuyucu ── */}
-      <section className="pane">
+      <section className={`pane ${tamEkran ? "is-tam-ekran" : ""}`}>
         {selected === null ? (
           <div className="pane-empty">
             <Logo size={44} muted />
@@ -311,8 +580,35 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
           <MessageView
             uid={selected}
             mailbox={mailbox}
-            onClose={() => setSelected(null)}
+            tamEkran={tamEkran}
+            onTamEkran={() => setTamEkran((t) => !t)}
+            onClose={() => {
+              setSelected(null);
+              setTamEkran(false);
+            }}
+            onTasindi={(hedef) => {
+              // Mail bu kutudan çıktı: okuyucuyu kapat, listeden düşür,
+              // rozetleri tazele. Yeniden çekmeye gerek yok.
+              setSelected(null);
+              setTamEkran(false);
+              setMessages((m) => m.filter((x) => x.uid !== selected));
+              setSonuclar((m) => (m ? m.filter((x) => x.uid !== selected) : m));
+              setBilgi(
+                hedef === "INBOX"
+                  ? "Gelen kutusuna taşındı."
+                  : "Spam klasörüne taşındı.",
+              );
+              sayaclariTazele();
+            }}
+            onOkundu={() => {
+              // Mail açılınca okundu işaretleniyor; rozet de düşsün
+              setMessages((m) =>
+                m.map((x) => (x.uid === selected ? { ...x, seen: true } : x)),
+              );
+              sayaclariTazele();
+            }}
             onReply={yanitla}
+            onForward={ilet}
           />
         )}
       </section>

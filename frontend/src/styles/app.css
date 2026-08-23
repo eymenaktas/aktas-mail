@@ -318,7 +318,10 @@
   min-height: 0;
 }
 .row {
-  display: block;
+  /* Avatar solda, içerik sağda */
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
   width: 100%;
   text-align: left;
   padding: 10px 16px;
@@ -426,11 +429,26 @@ kbd {
   font-size: 13.5px;
 }
 
+/*
+  Okuyucu sarmalayıcısı — `.pane` ile mail gövdesi arasındaki katman.
+
+  İki sorun vardı ve ikisi de gövdenin kesilmesine yol açıyordu:
+    1. `flex` verilmemişti: `.pane` bir sütun flex kabı, `.reader` da
+       içeriğine göre boyutlanıyordu. Alt taraftaki `.reader-body-sarmal`
+       "kalan alanı doldur" derken doldurulacak alan YOKTU, iframe de
+       kendi varsayılan yüksekliğine düşüp içeriği kesiyordu.
+    2. `overflow-y: auto` buradaydı: kaydırma bu katmanda oluyordu, yani
+       başlık ve hazır cevaplar da yukarı kayıyordu.
+
+  Artık `.reader` kalan alanı kaplıyor ve kaydırmıyor; kaydırmayı mail
+  gövdesi (iframe) kendi içinde yapıyor. Böylece üst çubuk sabit kalıyor.
+*/
 .reader {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
 }
 .reader-bar {
   display: flex;
@@ -503,9 +521,31 @@ kbd {
 .banner button {
   flex: none;
 }
+/*
+  Mail gövdesi yuvarlatılmış bir kart.
+
+  iframe'in kendi köşeleri yuvarlanmıyor (içerik taşar), o yüzden
+  `overflow: hidden` olan bir sarmalayıcıya konuyor. Kenar boşluğu da
+  gövdeyi panelden ayırıyor — mailin nerede başlayıp bittiği belli olsun.
+*/
+/*
+  Sarmalayıcı SAYDAM. Yuvarlak köşe ve zemin artık iframe'in İÇİNDEKİ
+  `.am-govde` kutusunda — orası içerik kadar yüksek olduğu için kısa
+  mailde koca boş kart kalmıyor. Buraya kenar/zemin verirsek o boşluk
+  yeniden çizilmiş olur.
+*/
+.reader-body-sarmal {
+  margin: 12px 16px 16px;
+  overflow: hidden;
+  background: transparent;
+  border: none;
+}
+
 .reader-body {
+  display: block;
   width: 100%;
-  min-height: 320px;
+  /* min-height YOK: flex kabında gereksiz, üstelik yüzde çözülemediğinde
+     iframe'i bu değere sabitleyip içeriği kesiyordu. */
   border: 0;
   background: transparent;
 }
@@ -721,7 +761,12 @@ kbd {
 .modal-wrap {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  /*
+    Telefondaki çekmece z-index 70, backdrop'ı 65. Pencere 60'ta kalırsa
+    "Ayarlar"a basınca ARKADA açılıyor ve hiçbir şey olmamış gibi
+    görünüyor (2026-08-21'de tam olarak bu yaşandı). Her katmanın üstünde.
+  */
+  z-index: 90;
   background: rgba(32, 33, 36, 0.55);
   display: grid;
   place-items: center;
@@ -908,4 +953,1006 @@ kbd {
   .theme-btn:hover svg {
     transform: none;
   }
+}
+
+
+/* ── Gönderen avatarı ──────────────────────────────────────
+   Kaynak sırası: BIMI logosu (mavi tikli) > Gravatar > harf avatarı.
+   Bkz. frontend/src/components/Avatar.tsx ve backend/src/mail/avatar.ts */
+
+.avatar {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-block;
+  margin-top: 2px;
+}
+
+.avatar-img,
+.avatar-harf {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  /* Marka logoları çoğu zaman beyaz zemin varsayar; koyu temada
+     görünmez olmasınlar diye zemin veriyoruz. */
+  background: #fff;
+}
+
+.avatar-harf {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+}
+
+/* Mavi tik — avatarın sağ altına oturur */
+.avatar-tik {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  /* Tikin kenarı arka planla ayrışsın */
+  filter: drop-shadow(0 0 1.5px var(--bg));
+}
+
+/* Satırın avatar dışındaki kısmı: taşan konuyu kırpabilmek için min-width:0 */
+.row-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ── Spam rozeti ───────────────────────────────────────────
+   DENEYSEL. Mail taşınmıyor/silinmiyor, yalnızca işaretleniyor.
+   Soru işareti bilerek: model gerçek gelen kutusunda yanılıyor
+   (ölçüm: backend/src/mail/spam.ts). */
+
+.row-spam {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--spam-line, #d08a2c);
+  border-radius: 999px;
+  color: var(--spam-fg, #b3730f);
+  background: var(--spam-bg, rgba(208, 138, 44, 0.1));
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  vertical-align: 1px;
+  /* Rozet bir tahmin; üstüne gelince yüzdesi ve uyarısı çıkıyor */
+  cursor: help;
+  white-space: nowrap;
+}
+
+/* Modelin kendinden emin olduğu durum — %51 ile %99 aynı görünmesin */
+.row-spam.is-yuksek {
+  color: #fff;
+  background: var(--spam-fg, #b3730f);
+  border-color: var(--spam-fg, #b3730f);
+}
+
+/* ── Profil fotoğrafı ayarı ────────────────────────────────── */
+
+.pp-satir {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.pp-onizleme {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: var(--read-bg);
+}
+
+.pp-not {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+
+/* Doğrulanmış gönderen bandı — uyarı değil BİLGİ, o yüzden mavi tonda.
+   Turuncu/kırmızı bant "dikkat et" der; buradaki mesaj tam tersi. */
+.banner.is-dogrulanmis {
+  border-color: var(--tik-line, #a8c7fa);
+  background: var(--tik-bg, rgba(26, 115, 232, 0.08));
+  color: var(--fg);
+}
+
+/* ── Arka plan: RENK x DESEN ───────────────────────────────
+   İki bağımsız seçim. Renk zemini ve ışıkları belirliyor; desen
+   NÖTR alfa ile üstüne biniyor, yani her desen her renkte çalışıyor.
+   Eskiden desenler kendi sabit renklerine hapsolmuştu.
+
+   Okuma paneli desenden muaf — gelen mailin kendi renkleri var. */
+
+:root[data-bg="gece"] { --bg-zemin: #0b1a33; --bg-isik1: 70,130,240; --bg-isik2: 140,90,230; --bg-alfa: .42; }
+:root[data-bg="okyanus"] { --bg-zemin: #062b38; --bg-isik1: 40,200,215; --bg-isik2: 40,120,200; --bg-alfa: .42; }
+:root[data-bg="orman"] { --bg-zemin: #0c2417; --bg-isik1: 70,215,130; --bg-isik2: 180,200,60; --bg-alfa: .42; }
+:root[data-bg="gunbatimi"] { --bg-zemin: #3a1428; --bg-isik1: 255,140,60; --bg-isik2: 230,60,120; --bg-alfa: .42; }
+:root[data-bg="mor"] { --bg-zemin: #1e0f36; --bg-isik1: 170,90,255; --bg-isik2: 90,120,255; --bg-alfa: .42; }
+:root[data-bg="kiraz"] { --bg-zemin: #2e0a18; --bg-isik1: 255,70,120; --bg-isik2: 255,150,90; --bg-alfa: .42; }
+:root[data-bg="lavanta"] { --bg-zemin: #191534; --bg-isik1: 150,130,255; --bg-isik2: 220,140,255; --bg-alfa: .42; }
+:root[data-bg="bakir"] { --bg-zemin: #2a1408; --bg-isik1: 255,150,60; --bg-isik2: 200,80,40; --bg-alfa: .42; }
+:root[data-bg="nane"] { --bg-zemin: #07231d; --bg-isik1: 60,230,180; --bg-isik2: 60,180,220; --bg-alfa: .42; }
+:root[data-bg="kadife"] { --bg-zemin: #131318; --bg-isik1: 160,160,200; --bg-isik2: 220,180,140; --bg-alfa: .42; }
+:root:not([data-theme="dark"])[data-bg="gece"] { --bg-zemin: #e8eef9; --bg-alfa: .32; }
+:root:not([data-theme="dark"])[data-bg="okyanus"] { --bg-zemin: #e4f5f9; --bg-alfa: .32; }
+:root:not([data-theme="dark"])[data-bg="orman"] { --bg-zemin: #e9f5ea; --bg-alfa: .32; }
+:root:not([data-theme="dark"])[data-bg="gunbatimi"] { --bg-zemin: #fdeee6; --bg-alfa: .32; }
+:root:not([data-theme="dark"])[data-bg="mor"] { --bg-zemin: #f0e9fb; --bg-alfa: .32; }
+:root:not([data-theme="dark"])[data-bg="kiraz"] { --bg-zemin: #fdeaf0; --bg-alfa: .32; }
+:root:not([data-theme="dark"])[data-bg="lavanta"] { --bg-zemin: #eeeafb; --bg-alfa: .32; }
+:root:not([data-theme="dark"])[data-bg="bakir"] { --bg-zemin: #fbeee0; --bg-alfa: .32; }
+:root:not([data-theme="dark"])[data-bg="nane"] { --bg-zemin: #e6f8f1; --bg-alfa: .32; }
+:root:not([data-theme="dark"])[data-bg="kadife"] { --bg-zemin: #f1f1f5; --bg-alfa: .32; }
+
+/* Renk seçilmişse zemin ve ışıklar; desen ayrı katman olarak üstte. */
+:root[data-bg] body {
+  background-color: var(--bg-zemin, var(--bg));
+  background-attachment: fixed;
+  background-image:
+    radial-gradient(ellipse 70% 50% at 12% 8%,  rgba(var(--bg-isik1), var(--bg-alfa)), transparent 62%),
+    radial-gradient(ellipse 65% 55% at 88% 22%, rgba(var(--bg-isik2), var(--bg-alfa)), transparent 64%),
+    radial-gradient(ellipse 90% 60% at 50% 108%, rgba(var(--bg-isik1), var(--bg-alfa)), transparent 66%);
+}
+
+/* KUZEY IŞIKLARI — özel kompozisyon.
+   Gerçek aurora dar, dikey, üst üste binen perdelerden oluşuyor;
+   tek bir yuvarlak leke o hissi vermiyor. Bu yüzden farklı açı ve
+   boyutlarda beş ince perde katmanlanıp yavaşça kayıyor. */
+:root[data-bg="kuzey"] body {
+  background-color: #050d18;
+  background-image:
+    radial-gradient(ellipse 26% 62% at 18% 24%, rgba(64,240,190,.50), transparent 68%),
+    radial-gradient(ellipse 20% 54% at 34% 12%, rgba(120,255,215,.34), transparent 70%),
+    radial-gradient(ellipse 30% 58% at 58% 20%, rgba(80,150,255,.42), transparent 68%),
+    radial-gradient(ellipse 22% 50% at 78% 14%, rgba(180,110,255,.38), transparent 70%),
+    radial-gradient(ellipse 120% 46% at 50% 104%, rgba(30,90,160,.44), transparent 72%),
+    linear-gradient(#050d18, #071426 60%, #040a12);
+  animation: aurora 26s ease-in-out infinite alternate;
+}
+:root:not([data-theme="dark"])[data-bg="kuzey"] body {
+  background-color: #eaf3fb;
+  background-image:
+    radial-gradient(ellipse 26% 62% at 18% 24%, rgba(40,210,165,.42), transparent 68%),
+    radial-gradient(ellipse 20% 54% at 34% 12%, rgba(90,230,195,.30), transparent 70%),
+    radial-gradient(ellipse 30% 58% at 58% 20%, rgba(70,140,240,.34), transparent 68%),
+    radial-gradient(ellipse 22% 50% at 78% 14%, rgba(160,100,240,.30), transparent 70%),
+    radial-gradient(ellipse 120% 46% at 50% 104%, rgba(120,180,230,.34), transparent 72%),
+    linear-gradient(#eaf3fb, #e3eef9);
+}
+
+/* Perdeler yavaşça kayıyor — aurora'nın hareketi olmadan resim gibi
+   duruyor. 26 saniye bilerek yavaş: dikkat dağıtmasın. */
+@keyframes aurora {
+  from { background-position: 0% 0%, 0% 0%, 0% 0%, 0% 0%, 0% 0%, 0 0; }
+  to   { background-position: 8% 4%, -6% 2%, 5% -3%, -8% 3%, 0% 0%, 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-bg="kuzey"] body { animation: none; }
+}
+
+/* ── DESENLER ──────────────────────────────────────────────
+   Ayrı bir katman (body::before) olarak çiziliyor ki rengin
+   gradyanlarını ezmesin. Nötr beyaz/siyah alfa: her renkte çalışır. */
+
+:root[data-desen] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  --d: rgba(255, 255, 255, 0.10);
+  --d2: rgba(255, 255, 255, 0.16);
+}
+:root:not([data-theme="dark"])[data-desen] body::before {
+  --d: rgba(0, 0, 0, 0.075);
+  --d2: rgba(0, 0, 0, 0.12);
+}
+
+:root[data-desen="cizgi"] body::before {
+  background-image: repeating-linear-gradient(45deg, var(--d) 0 2px, transparent 2px 14px);
+}
+:root[data-desen="izgara"] body::before {
+  background-image:
+    linear-gradient(var(--d) 1px, transparent 1px),
+    linear-gradient(90deg, var(--d) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+:root[data-desen="nokta"] body::before {
+  background-image: radial-gradient(var(--d2) 1.5px, transparent 1.6px);
+  background-size: 20px 20px;
+}
+:root[data-desen="altigen"] body::before {
+  background-image:
+    repeating-linear-gradient( 60deg, var(--d) 0 1px, transparent 1px 30px),
+    repeating-linear-gradient(-60deg, var(--d) 0 1px, transparent 1px 30px),
+    repeating-linear-gradient(  0deg, var(--d) 0 1px, transparent 1px 26px);
+}
+:root[data-desen="ucgen"] body::before {
+  background-image:
+    linear-gradient( 45deg, var(--d) 25%, transparent 25% 75%, var(--d) 75%),
+    linear-gradient(-45deg, var(--d) 25%, transparent 25% 75%, var(--d) 75%);
+  background-size: 34px 34px;
+}
+:root[data-desen="baklava"] body::before {
+  background-image:
+    repeating-linear-gradient( 45deg, var(--d) 0 1px, transparent 1px 22px),
+    repeating-linear-gradient(-45deg, var(--d) 0 1px, transparent 1px 22px);
+}
+:root[data-desen="dalga"] body::before {
+  background-image: repeating-linear-gradient(0deg, var(--d) 0 1px, transparent 1px 16px);
+}
+:root[data-desen="devre"] body::before {
+  background-image:
+    repeating-linear-gradient(90deg, var(--d) 0 1px, transparent 1px 42px),
+    repeating-linear-gradient( 0deg, var(--d) 0 1px, transparent 1px 42px),
+    radial-gradient(var(--d2) 1.8px, transparent 1.9px);
+  background-size: auto, auto, 42px 42px;
+}
+
+/*
+  Paneller desen katmanının (body::before) ÜSTÜNDE kalmalı.
+
+  DİKKAT: bunu `.sidebar/.list/.pane`'e `position: relative` vererek
+  yapmak TELEFON DÜZENİNİ BOZUYOR — orada `.sidebar` çekmece olarak
+  `position: fixed; z-index: 70` ile duruyor ve bu kural dosyada
+  media query'den SONRA geldiği için onu eziyordu.
+
+  Bunun yerine yalnızca kapsayıcıya yığın bağlamı veriyoruz; içindeki
+  fixed çekmece ve backdrop kendi z-index'leriyle çalışmaya devam ediyor.
+*/
+.app {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── LIQUID GLASS ──────────────────────────────────────────
+   Paneller buzlu cam: arka plan görünsün ama metin okunsun.
+
+   Üç şey birlikte çalışıyor, biri eksikse etki dağılıyor:
+     1. saydamlık      — arka plan gerçekten görünsün
+     2. blur + saturate — arkadaki renkler cama sızsın. `saturate`
+        olmadan bulanık zemin gri ve cansız görünüyor.
+     3. kenar ışığı    — üstte ince açık çizgi; cama kalınlık veren şey bu
+
+   Okunurluk pazarlığı: panel saydamlığı %55-62'de tutuldu. Daha
+   aşağısı arka planı güzelleştiriyor ama mail listesini yoruyor. */
+
+:root[data-bg] {
+  /* Kenar rengi bilerek ÇOK soluk: görünür bir çizgi değil, yalnızca
+     düğme gibi küçük öğelerin sınırını belli eden bir iz. */
+  --cam-kenar: rgba(255, 255, 255, 0.07);
+  --cam-golge: 0 8px 32px rgba(0, 0, 0, 0.30);
+  --cam-blur: blur(26px) saturate(180%);
+  /* Panel hattı temanın ışık rengini alıyor: nötr gri bir çizgi camın
+     üstünde yapıştırılmış duruyor, tema rengiyse aynı dile ait oluyor. */
+  /* Kenar ışığı temanın renginden türüyor — nötr gri bir çizgi camın
+     üstünde yapıştırılmış duruyor, tema rengiyse aynı dile ait oluyor. */
+  /* Panel içi ayraçlar: temanın KOYU tarafından, açık değil.
+     Açık renkli ayraç camın üstünde beyaz çizgi gibi duruyordu. */
+  --hat: rgba(0, 0, 0, 0.16);
+}
+
+:root:not([data-theme="dark"])[data-bg] {
+  --cam-kenar: rgba(0, 0, 0, 0.07);
+  --hat: rgba(0, 0, 0, 0.09);
+  --cam-golge: 0 8px 32px rgba(31, 45, 68, 0.16);
+}
+
+:root[data-bg] .sidebar,
+:root[data-bg] .list,
+:root[data-bg] .pane {
+  background: color-mix(in srgb, var(--bg) 58%, transparent);
+  backdrop-filter: var(--cam-blur);
+  -webkit-backdrop-filter: var(--cam-blur);
+}
+
+/*
+  Panel ayrımı — ÇİZGİ YOK.
+
+  Sırayla denendi ve hepsi ekranda "yapıştırılmış beyaz çizgi" olarak
+  göründü: 1.5px net kenar, `inset 0 1px 0` iç ışık, `::after` ile
+  bulanık gradyan şerit. Üçü de kaldırıldı.
+
+  Paneller artık yalnızca SAYDAMLIK FARKI ve dıştaki yumuşak gölgeyle
+  ayrılıyor. Cam gerçekte de böyle davranıyor: kenarı bir hat değil,
+  ışığın yoğunluk farkı.
+*/
+/*
+  DİKKAT — burada `position` AYARLANMAZ.
+
+  `:root[data-bg] .sidebar` seçicisi (0,2,1) telefon media query'sindeki
+  `.sidebar` kuralından (0,1,0) daha güçlü. Buraya `position: relative`
+  yazınca telefondaki `position: fixed` çekmece eziliyor ve TEMA SEÇİLİ
+  OLDUĞU ANDA mobil düzen tamamen çöküyordu (2026-08-21).
+
+  Cam görünümü için konumlandırmaya gerek yok; yalnızca zemin ve gölge
+  yeterli.
+*/
+:root[data-bg] .sidebar,
+:root[data-bg] .list,
+:root[data-bg] .pane {
+  border: none;
+  box-shadow: var(--cam-golge);
+}
+
+/*
+  Kenar geçiş şeritleri KALDIRILDI.
+
+  `::after` ile çizilen saydam gradyan şeritler, bulanık bir geçiş
+  vermek yerine ekranda dikey yarı saydam BEYAZ ÇİZGİLER olarak
+  görünüyordu — çözmeye çalıştığımız sorunun ta kendisi.
+
+  Paneller birbirinden artık yalnızca ŞUNLARLA ayrılıyor:
+    - farklı saydamlık seviyeleri (kenar çubuğu / liste / okuma paneli)
+    - dıştaki yumuşak gölge
+  Çizgi yok. Cam gerçekte de böyle: kenarı bir hat değil, ışığın
+  yoğunluk farkı.
+*/
+
+:root[data-bg] .list-bar,
+:root[data-bg] .reader-head,
+:root[data-bg] .sidebar-foot {
+  border-top-color: var(--hat);
+  background: color-mix(in srgb, var(--bg) 42%, transparent);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  /* Ayraç yok: çubuk zaten daha yoğun, fark kendiliğinden görünüyor. */
+  border-bottom: none;
+}
+
+:root[data-bg] .row {
+  background: color-mix(in srgb, var(--read-bg) 32%, transparent);
+  border-bottom: none;
+}
+:root[data-bg] .row.is-unread {
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+}
+:root[data-bg] .row:hover { background: color-mix(in srgb, var(--bg) 74%, transparent); }
+:root[data-bg] .row.is-selected {
+  background: color-mix(in srgb, var(--accent, #1a73e8) 24%, transparent);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+}
+
+/*
+  DİKKAT — .btn-primary BU KURALIN DIŞINDA.
+
+  Birincil düğmenin yazı rengi `var(--bg)` (accent zemin üstünde ters
+  renk). Arka planını `--bg`'nin saydam hâli yapınca yazı zeminle aynı
+  renge geliyor ve KAYBOLUYOR. 2026-08-21'de "Fotoğraf seç", "Passkey
+  ekle", "Kullanıcı ekle" düğmeleri bu yüzden boş göründü.
+*/
+:root[data-bg] .search,
+:root[data-bg] .search input,
+:root[data-bg] .btn:not(.btn-primary),
+:root[data-bg] .icon-btn {
+  background: color-mix(in srgb, var(--bg) 46%, transparent);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  border: 1px solid var(--cam-kenar);
+}
+
+/* Birincil düğme camda da okunur kalsın: zemin accent, yazı ters renk. */
+:root[data-bg] .btn-primary {
+  background: var(--accent);
+  color: var(--bg);
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, #fff);
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+:root[data-bg] .folder.is-active {
+  background: color-mix(in srgb, var(--accent, #1a73e8) 30%, transparent);
+}
+:root[data-bg] .folder:hover:not(.is-active) {
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+
+:root[data-bg] .modal {
+  background: color-mix(in srgb, var(--bg) 76%, transparent);
+  backdrop-filter: var(--cam-blur);
+  -webkit-backdrop-filter: var(--cam-blur);
+  border: 1px solid var(--cam-kenar);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+}
+
+/* MAİL GÖVDESİ camdan MUAF: iframe'in içindeki HTML'i gönderen yazdı,
+   arkasında desen olursa kendi renkleriyle çakışıp okunaksız oluyor. */
+:root[data-bg] .reader-body { background: var(--bg); }
+
+/* Cam efekti yoksa saydamlık okunurluğu bozar — opak zemine dön. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root[data-bg] .sidebar,
+  :root[data-bg] .list,
+  :root[data-bg] .pane,
+  :root[data-bg] .modal { background: var(--bg); }
+}
+
+/* ── Tema seçici ─────────────────────────────────────────── */
+
+.bg-secenekler {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.bg-secenek {
+  width: 74px;
+  padding: 0;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: none;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.bg-secenek.is-secili {
+  border-color: var(--accent, #1a73e8);
+}
+
+.bg-onizleme {
+  display: block;
+  height: 44px;
+}
+
+.bg-secenek span.bg-ad {
+  display: block;
+  padding: 4px 0 5px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--bg);
+}
+
+/* ── Etiketleme çubuğu (model eğitim verisi) ───────────────── */
+
+.etiket-cubugu {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.etiket-soru {
+  color: var(--muted);
+}
+
+.btn.is-secili {
+  background: var(--accent, #1a73e8);
+  color: #fff;
+  opacity: 1;
+}
+
+.etiket-ok {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.etiket-hata {
+  color: #c5221f;
+  font-size: 12px;
+}
+
+/* ── Klasör okunmamış sayacı ───────────────────────────────── */
+
+.folder.has-unseen .folder-name {
+  font-weight: 700;
+}
+
+.folder-unseen {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.folder.is-active .folder-unseen {
+  color: inherit;
+}
+
+/* ── Otomatik bakım bildirimi ──────────────────────────────── */
+
+.bakim-note {
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  background: var(--spam-bg, rgba(208, 138, 44, 0.1));
+}
+
+/* Eğitim verisi sayaçları */
+.egitim-sayilar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin: 14px 0 4px;
+}
+.egitim-sayilar > div {
+  display: flex;
+  flex-direction: column;
+}
+.egitim-sayilar b {
+  font-size: 22px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.egitim-sayilar span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ── Görünüm sekmesi: açık/koyu seçimi ─────────────────────── */
+
+.gorunum-baslik {
+  margin: 18px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.gorunum-baslik:first-child { margin-top: 0; }
+
+.tema-secim {
+  display: flex;
+  gap: 10px;
+}
+
+.tema-dugme {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px 8px 8px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+}
+.tema-dugme.is-secili { border-color: var(--accent, #1a73e8); }
+
+.tema-ornek {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+/* Örnekler SABİT renkte: aktif temaya göre değişirlerse iki düğme
+   birbirine benzer ve seçim anlamsızlaşır. */
+.tema-ornek-acik { background: linear-gradient(135deg,#ffffff 50%,#f2f6fc 50%); }
+.tema-ornek-koyu { background: linear-gradient(135deg,#1f1f1f 50%,#1a1a1a 50%); }
+
+/* Kenar çubuğundaki kendi profil fotoğrafın */
+.avatar-sm-img {
+  object-fit: cover;
+  border-radius: 50%;
+  padding: 0;
+}
+
+/* ── Üç nokta menüsü ───────────────────────────────────────
+   Spam sorusu buraya taşındı: sabit bir çubuk olarak her mailin
+   üstünde durup sürekli sormasın diye. */
+
+.menu-sarmal { position: relative; }
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  min-width: 232px;
+  padding: 6px;
+  border: 1px solid var(--cam-kenar, var(--line));
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: 0 12px 32px rgba(0,0,0,.28);
+}
+:root[data-bg] .menu {
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+
+.menu-baslik {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.menu-skor { font-variant-numeric: tabular-nums; }
+
+.menu-ogesi {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.menu-ogesi:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); }
+.menu-ogesi.is-secili { color: var(--accent, #1a73e8); font-weight: 600; }
+
+.menu-not {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.menu-hata { color: #c5221f; }
+
+/* ── Hazır cevaplar ────────────────────────────────────────
+   Kural tablosu, dil modeli değil (bkz. QuickReplies.tsx). */
+
+.hazir-cevaplar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.hazir-baslik { font-size: 12px; color: var(--muted); }
+
+.hazir-dugme {
+  padding: 7px 14px;
+  border: 1px solid var(--cam-kenar, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent, #1a73e8) 12%, transparent);
+  color: var(--accent, #1a73e8);
+  font-size: 13px;
+  cursor: pointer;
+}
+.hazir-dugme:hover {
+  background: color-mix(in srgb, var(--accent, #1a73e8) 22%, transparent);
+}
+
+/* Özel arka plan işareti (Kuzey ışıkları gibi kendi kompozisyonu olanlar) */
+.bg-ozel { color: var(--accent, #1a73e8); font-size: 10px; }
+
+/* ── Tam ekran okuma (masaüstü) ────────────────────────────
+   Gmail'deki gibi: mail listesi ve kenar çubuğu kaybolmaz, okuma
+   paneli onların ÜSTÜNE gelir. Böylece kapatınca liste aynı
+   kaydırma konumunda duruyor. */
+
+.pane.is-tam-ekran {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border-left: none;
+}
+
+:root[data-bg] .pane.is-tam-ekran {
+  /* Tam ekranda arka planın görünmesi metni yoruyor — daha opak */
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+}
+
+.tam-ekran-dugme { font-size: 15px; }
+
+/* Telefonda okuma paneli zaten tam ekran; düğme gereksiz */
+@media (max-width: 860px) {
+  .tam-ekran-dugme { display: none; }
+  .pane.is-tam-ekran { position: relative; z-index: auto; }
+}
+
+/* ── Model künyesi ─────────────────────────────────────────
+   Rozete bakan kişi neye güvendiğini bilsin: hangi veriyle
+   eğitildi, ne kadar doğru, nerede yanılıyor. */
+
+.model-kunye {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--read-bg);
+}
+:root[data-bg] .model-kunye {
+  background: color-mix(in srgb, var(--bg) 45%, transparent);
+  border-color: var(--cam-kenar);
+}
+
+.model-kunye summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  cursor: pointer;
+  list-style: none;
+}
+.model-kunye summary::-webkit-details-marker { display: none; }
+.model-kunye summary::before { content: "▸"; color: var(--muted); }
+.model-kunye[open] summary::before { content: "▾"; }
+
+.model-skor { font-variant-numeric: tabular-nums; font-weight: 600; }
+.model-artis {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(30, 160, 90, 0.16);
+  color: #1e8e56;
+  font-size: 11px;
+  font-weight: 600;
+}
+.model-surum { margin-left: auto; font-size: 11px; color: var(--muted); }
+
+.model-kunye h5 {
+  margin: 12px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.model-satir { margin: 4px 0; font-size: 12px; color: var(--muted); }
+.model-liste { margin: 4px 0; padding-left: 18px; font-size: 12.5px; line-height: 1.55; }
+.model-liste .model-not { color: var(--muted); }
+.model-iyi li::marker { content: "✓ "; color: #1e8e56; }
+.model-kotu li::marker { content: "! "; color: #b3730f; }
+
+/* ── Alt çubuk: hazır cevaplar + gövde teması ──────────────
+   Tema düğmesi buraya taşındı (üst çubuktan): neyi değiştirdiği
+   ancak mailin yanındayken belli oluyor. */
+
+.alt-cubuk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  /*
+    SARMA YOK. `flex-wrap: wrap` denendi ama dar ekranda tema düğmesi
+    tek başına alt satıra düşüp öksüz duruyordu. Bunun yerine hazır
+    cevaplar yatay kayıyor, düğme sağda sabit kalıyor.
+  */
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.alt-cubuk .hazir-cevaplar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  /* Kaydırma çubuğu görünmesin ama kaydırma çalışsın */
+  scrollbar-width: none;
+}
+.alt-cubuk .hazir-cevaplar::-webkit-scrollbar { display: none; }
+.alt-cubuk .hazir-dugme { flex: 0 0 auto; }
+:root[data-bg] .alt-cubuk { border-top-color: var(--hat); }
+
+.alt-cubuk .hazir-cevaplar {
+  flex: 1 1 auto;
+  border-top: none;
+}
+
+.alt-tema { flex: 0 0 auto; margin-right: 12px; }
+
+/* Model ölçümleri — F1 öne çıkıyor, doğruluk soluk (yanıltıcı olduğu için) */
+.model-olcum {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 6px 0 4px;
+}
+.model-olcum > div { display: flex; flex-direction: column; cursor: help; }
+.model-olcum b { font-size: 17px; font-variant-numeric: tabular-nums; }
+.model-olcum span { font-size: 11px; color: var(--muted); }
+.model-soluk { color: var(--muted); font-weight: 500; }
+
+/* Cam temada liste satırları da yuvarlak — köşeli satırlar yuvarlak
+   panellerin içinde sert duruyor.
+
+   YAN BOŞLUK SATIRA DEĞİL KAPSAYICIYA VERİLİYOR. İki denemede de
+   sorun çıkmıştı (2026-08-21):
+     `.row { width: 100%; margin: 0 8px }` -> %100+16px = YATAY KAYDIRMA
+     `.row { width: auto;  margin: 0 8px }` -> `<button>` bir form
+        denetimi, `auto` genişlikte içeriğine büzülüyor (375 yerine 304px)
+   Kapsayıcıya padding verince satır tam oturuyor, calc gerekmiyor. */
+:root[data-bg] .row {
+  margin: 3px 0;
+  border-radius: 12px;
+  border-bottom: none;
+}
+:root[data-bg] .rows { padding: 4px 8px 0; }
+
+/* ── Telefon: cam ayarları ─────────────────────────────────
+   Bu blok cam kurallarından SONRA gelmeli — media query özgüllük
+   eklemiyor, sıra belirliyor. */
+
+@media (max-width: 760px) {
+  /*
+    Çekmece ÖRTÜ, yan yana panel değil.
+
+    Masaüstünde %58 saydamlık doğru: paneller yan yana duruyor ve arka
+    plan aralarından görünüyor. Telefonda kenar çubuğu mail listesinin
+    ÜSTÜNE geliyor; %58'de listenin yazıları çekmecenin içinden okunup
+    ikisi birbirine karışıyordu.
+  */
+  :root[data-bg] .sidebar {
+    background: color-mix(in srgb, var(--bg) 94%, transparent);
+  }
+
+  /* Liste ve okuma paneli tek başına tam ekran olduğu için altlarında
+     görünecek bir şey yok; saydamlık yalnızca metni yoruyor. */
+  :root[data-bg] .list,
+  :root[data-bg] .pane {
+    background: color-mix(in srgb, var(--bg) 78%, transparent);
+  }
+
+  /* Yatay panel gölgesi telefonda anlamsız (yan panel yok) */
+  :root[data-bg] .list,
+  :root[data-bg] .pane {
+    box-shadow: none;
+  }
+}
+
+/* ── Okuma paneli: dikeyde sığdır ──────────────────────────
+   Panel bir flex sütun; gövde kalan yüksekliği kaplıyor ve uzun
+   mailde İFRAME KENDİ İÇİNDE kayıyor. Sayfanın kendisi kaymıyor,
+   böylece üst çubuk ve hazır cevaplar hep görünür kalıyor. */
+
+/*
+  DİKKAT — burada `display` AYARLANMAZ.
+
+  Telefonda `.pane` mesaj seçilene kadar `display: none`. Buraya
+  `display: flex` yazınca (aynı özgüllük, dosyada sonra geldiği için
+  kazanıyor) "Okumak için bir mesaj seç" ekranı telefonda da
+  görünüyordu — orada okuma paneli hiç olmamalı.
+
+  Sütun düzenini `.app.is-reading .pane` zaten kuruyor; masaüstü için
+  de aşağıda ayrıca veriliyor.
+*/
+.pane {
+  flex-direction: column;
+  min-height: 0;
+}
+
+@media (min-width: 761px) {
+  .pane { display: flex; }
+}
+@media (max-width: 760px) {
+  .app.is-reading .pane { display: flex; }
+}
+
+/*
+  Yükseklik YÜZDEYLE değil FLEX ile veriliyor.
+
+  `.reader-body { height: 100% }` çalışmıyordu: sarmalayıcının yüksekliği
+  `flex-basis: auto` yüzünden içeriğine (yani iframe'e) bağlıydı, bu da
+  dairesel bir bağımlılık yaratıp yüzdeyi `auto`ya düşürüyordu. iframe de
+  `min-height: 320px`'e oturup içeriği ORTADAN KESİYORDU (2026-08-22).
+
+  Sarmalayıcıyı da flex kabı yapınca iframe yüzdeye ihtiyaç duymadan
+  geriye kalan alanı kaplıyor; içerik uzunsa iframe kendi içinde kayıyor.
+*/
+.reader-body-sarmal {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.reader-body {
+  flex: 1 1 auto;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+}
+
+
+/* ── Kaydırma sınırları ────────────────────────────────────
+   Tek kaydırılan yer mesaj listesi. Kabuğun geri kalanı sabit;
+   taşan içerik varsa o kap kendi içinde çözüyor. */
+
+.app {
+  overflow: hidden;
+}
+
+.list {
+  overflow: hidden; /* kaydırmayı .rows yapıyor */
+}
+
+.rows {
+  overflow-y: auto;
+  /* Yatay kaydırma ASLA. Uzun konu satırı kırpılır, ekranı itmez. */
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
+.pane {
+  overflow: hidden; /* kaydırmayı iframe kendi içinde yapıyor */
+}
+
+/* Kenar çubuğu: klasörler gerekirse kayar, alt kısım SABİT kalır —
+   "Ayarlar"a ulaşmak için kaydırmak gerekmesin. */
+.sidebar {
+  overflow: hidden;
+}
+.folders {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
+/*
+  Klasörler EZİLMESİN, kapsayıcı kaysın.
+
+  Flex sütununda varsayılan `flex-shrink: 1` yüzünden çok klasör olunca
+  düğmeler 40px'ten 30px'e sıkışıyordu (ölçüldü: 21 klasörde). Kullanıcı
+  bunu "yazılar küçüldü" diye görür, kaydırma da çıkmaz.
+*/
+.folder {
+  flex: 0 0 auto;
+}
+.sidebar-foot {
+  flex: 0 0 auto;
+  margin-top: auto;
+}
+
+/* Uzun konu/gönderen satırı listeyi genişletmesin */
+.row-subject,
+.row-preview,
+.row-from {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-body {
+  overflow: hidden;
+}
+
+/* Spam şüphesi yüzünden engellenen görseller — uyarı tonunda */
+.banner.is-supheli {
+  border-color: var(--spam-line);
+  background: var(--spam-bg);
+}
+
+/* ── Okunmamış vurgusu ─────────────────────────────────────
+   Gönderen ve konu zaten kalın; önizleme de belirginleşsin ve
+   solda ince bir işaret olsun — Gmail'in yaptığı gibi taranırken
+   okunmamışlar hemen ayırt edilsin. */
+
+.row.is-unread .row-preview {
+  color: var(--fg);
+}
+
+.row.is-unread {
+  position: relative;
+}
+.row.is-unread::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 50%;
+  background: var(--accent, #1a73e8);
+}
+:root[data-bg] .row.is-unread::before { left: 2px; }
+
+/* Rozet gönderen satırında: kırpılmasın diye sabit yer ayrılıyor
+   ve tarih ile arasına itiliyor. */
+.row-top .row-spam {
+  flex: 0 0 auto;
+  margin-left: 6px;
+}
+/* Gönderen adı uzunsa O kırpılsın, rozet değil */
+.row-top .row-from {
+  min-width: 0;
 }
