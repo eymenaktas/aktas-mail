@@ -140,8 +140,20 @@ async function spameTasi(
   const okunmamis = Array.isArray(bulunan) ? bulunan : [];
   if (okunmamis.length === 0) return { tasinan: 0, uidler: [] };
 
-  // Son 50 okunmamış yeterli; kutunun tamamını her seferinde taramak pahalı.
-  const bakilacak = okunmamis.slice(-50);
+  /*
+    Koşu başına bakılacak en fazla okunmamış mail.
+
+    50'ydi ve fazla temkinliymiş: 2026-08-24'te ölçüldü, bir koşuda
+    47 mail 148 ms'de işlendi. Yani sınır 200'e çıkınca gelen kutusu
+    listelemesine eklenen gecikme yarım saniye civarında kalıyor ve
+    yalnızca gerçekten biriktiğinde ödeniyor.
+
+    Sınır neden var: bakım gelen kutusu listelenirken çalışıyor
+    (sunucu IMAP parolası saklamadığı için arka plan işi yapısal olarak
+    imkânsız), yani her koşu kullanıcının beklediği süreye ekleniyor.
+  */
+  const BAKILACAK_SINIR = Number(process.env["SPAM_BAKIM_SINIR"] ?? 200);
+  const bakilacak = okunmamis.slice(-BAKILACAK_SINIR);
 
   interface Aday {
     uid: number;
