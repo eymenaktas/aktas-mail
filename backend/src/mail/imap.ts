@@ -280,10 +280,20 @@ export async function getMessage(
       /**
        * Uzak görsel kararı, üç kuralın birleşimi:
        *   1. Kullanıcı açıkça "göster" dediyse -> aç
-       *   2. Gönderen BIMI+VMC doğrulanmışsa -> aç
-       *   3. Spam ihtimali eşiği geçiyorsa -> KAPAT (1 ve 2'yi de ezer
-       *      değil; doğrulanmış gönderen zaten spam çıkmaz, ama model
-       *      yanılırsa kullanıcının açık isteği öncelikli kalır)
+       *   2. Spam ihtimali eşiğin (%20) ALTINDAysa -> aç
+       *   3. Üstündeyse -> KAPAT
+       *
+       * 2026-08-24'te değişti. Önce "doğrulanmış gönderen VE eşiğin
+       * altında" isteniyordu; yani BIMI/DMARC'ı olmayan sıradan bir
+       * kişiden gelen tertemiz mailde bile görseller kapalı kalıyordu
+       * ve her seferinde "göster"e basmak gerekiyordu. Eymen'in isteği
+       * üzerine kural sadeleşti: eşiğin altındaki her mailde görseller
+       * açılıyor.
+       *
+       * BEDELİ: uzak görsel bir takip pikselidir. Artık spam sayılmayan
+       * her mailde gönderen "bu adres canlı, mail okundu" bilgisini
+       * alıyor. Eşik bu yüzden düşük tutuluyor (%20) — şüphelinin
+       * şüphesi varsa kapalı kalsın.
        */
       const [govdeSkoru] = await spamSkorla([
         `${msg.envelope?.subject ?? ""} ${htmlToOnizleme(parsed.html || parsed.text || "")}`
@@ -293,8 +303,7 @@ export async function getMessage(
       ]);
       const supheli = (govdeSkoru?.skor ?? 0) > GORSEL_ESIGI;
 
-      const gorselleriAc =
-        (opts.allowRemoteImages ?? false) || (senderVerified && !supheli);
+      const gorselleriAc = (opts.allowRemoteImages ?? false) || !supheli;
 
       const cleaned = parsed.html
         ? sanitizeEmailHtml(parsed.html, { allowRemoteImages: gorselleriAc })
