@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { senderAvatars } from "../db/schema.js";
 import { bimiCoz, gravatarCoz, dmarcCoz, domainAyikla, type AvatarSonucu } from "./avatar.js";
+import { markaLogosu } from "./marka-logolari.js";
 
 export { domainAyikla };
 
@@ -106,7 +107,15 @@ export async function avatarGetir(adres: string): Promise<AvatarSonucu> {
     (await onbellektenOku(dmarcAnahtar)) ??
     (await coz(dmarcAnahtar, () => dmarcCoz(domain)));
 
-  // 3) Gravatar — kişisel fotoğraf. Kendisi doğrulama sağlamıyor;
+  // 3) Yerel marka logosu — YALNIZCA doğrulanmış domainde.
+  //    BIMI yayınlamayan markalar (github, google, microsoft) için.
+  //    DNS sorgusu yok, gömülü; önbelleğe de yazılmıyor (zaten bedava).
+  if (dmarc.verified) {
+    const marka = markaLogosu(domain);
+    if (marka) return { image: marka, verified: true, source: "marka" };
+  }
+
+  // 4) Gravatar — kişisel fotoğraf. Kendisi doğrulama sağlamıyor;
   //    tik yalnızca DMARC'tan geliyor.
   const gravatar =
     (await onbellektenOku(temiz)) ??

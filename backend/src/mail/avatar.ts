@@ -1,3 +1,4 @@
+import { markaLogosu } from "./marka-logolari.js";
 import { createHash } from "node:crypto";
 import { resolveTxt } from "node:dns/promises";
 
@@ -35,7 +36,7 @@ export interface AvatarSonucu {
   image: string | null;
   /** VMC doğrulanmış mı — mavi tik */
   verified: boolean;
-  source: "bimi" | "dmarc" | "gravatar" | "none";
+  source: "bimi" | "marka" | "dmarc" | "gravatar" | "none";
 }
 
 const BULUNAMADI: AvatarSonucu = { image: null, verified: false, source: "none" };
@@ -259,15 +260,31 @@ export async function avatarCoz(adres: string): Promise<AvatarSonucu> {
     const bimi = await bimiCoz(domain);
     if (bimi) return bimi;
 
+    const dogrulanmis = await dmarcZorluyorMu(domain);
+
+    /*
+      YEREL MARKA LOGOSU — yalnızca domain DOĞRULANMIŞSA.
+
+      github/google/microsoft gibi markalar BIMI yayınlamıyor, o yüzden
+      tik alıp fotoğraf alamıyorlardı. Katalog boşluğu dolduruyor.
+
+      Doğrulama şartı kritik: yoksa "github.com" yazan sahte bir gönderen
+      GitHub logosunu alırdı — tikin engellemesi gereken şeyin ta kendisi.
+    */
+    if (dogrulanmis) {
+      const marka = markaLogosu(domain);
+      if (marka) return { image: marka, verified: true, source: "marka" };
+    }
+
     // Gravatar tam adres ister; yalnızca domain verildiyse bakılamaz.
     if (temiz.includes("@")) {
       const gravatar = await gravatarCoz(temiz);
-      if (gravatar) return { ...gravatar, verified: await dmarcZorluyorMu(domain) };
+      if (gravatar) return { ...gravatar, verified: dogrulanmis };
     }
 
     // Fotoğraf yok ama domain taklit edilemiyorsa yine de tik ver:
     // harf avatarı + mavi tik (Google'ın işlem mailleri böyle).
-    if (await dmarcZorluyorMu(domain)) {
+    if (dogrulanmis) {
       return { image: null, verified: true, source: "dmarc" };
     }
     return BULUNAMADI;
