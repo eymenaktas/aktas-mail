@@ -39,7 +39,11 @@ else
   # yani kabuk geçmişine ve süreç listesine düşmüyor.
   HASH=$(doveadm pw -s SHA512-CRYPT)
   touch "$MASTER_DOSYASI"
-  chmod 600 "$MASTER_DOSYASI"
+  # 640 OLMALI, 600 DEĞİL: dovecot'un auth süreci bu dosyayı grup
+  # üzerinden okuyor. 600'de "Temporary authentication failure" veriyor
+  # ve sebebi hata mesajından anlaşılmıyor. Yanındaki `users` dosyası
+  # da 640 — örnek oradaydı, bakmamışım.
+  chmod 640 "$MASTER_DOSYASI"
   chown root:dovecot "$MASTER_DOSYASI"
   echo "jarvis:$HASH" >> "$MASTER_DOSYASI"
   echo "  eklendi: $MASTER_DOSYASI"
