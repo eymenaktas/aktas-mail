@@ -43,7 +43,7 @@ gösterilmez**, hemen kopyala.
 Ardından sunucuda:
 
 ```bash
-nano /opt/aktas-mail/.env        # JARVIS_IMAP_PASS satırını doldur
+nano /opt/aktas-mail/backend/.env        # JARVIS_IMAP_PASS satırını doldur
 doveconf -n >/dev/null            # sözdizimi kontrolü — hata verirse DURDUR
 systemctl reload dovecot
 pm2 restart aktas-mail
@@ -82,7 +82,7 @@ systemctl reload dovecot
 > /etc/dovecot/master-users
 
 # 3. Uygulama ayarlarını geri al
-cp /opt/aktas-mail/.env.yedek-<damga> /opt/aktas-mail/.env
+cp /opt/aktas-mail/backend/.env.yedek-<damga> /opt/aktas-mail/backend/.env
 pm2 restart aktas-mail
 ```
 
