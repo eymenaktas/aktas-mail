@@ -13,6 +13,7 @@ import { profileRoutes } from "./routes/profile.js";
 import { pushRoutes } from "./routes/push.js";
 import { eventRoutes } from "./routes/events.js";
 import { spamRoutes } from "./routes/spam.js";
+import { jarvisRoutes } from "./routes/jarvis.js";
 import { closeDb } from "./db/index.js";
 
 /**
@@ -127,6 +128,9 @@ await app.register(profileRoutes);
 await app.register(pushRoutes);
 await app.register(eventRoutes);
 await app.register(spamRoutes);
+// Jarvis: ayrı kimlik, ayrı kapı, salt okuma. Yapılandırılmamışsa
+// uçlar 503 dönüyor — kurulmadan da uygulama normal çalışıyor.
+await app.register(jarvisRoutes);
 
 // Hata gövdesinde yığın izi sızmasın
 app.setErrorHandler((error: unknown, req, reply) => {
