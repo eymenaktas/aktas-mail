@@ -16,7 +16,7 @@ set -euo pipefail
 
 LOCAL_CONF=/etc/dovecot/local.conf
 MASTER_DOSYASI=/etc/dovecot/master-users
-ENV_DOSYASI=/opt/aktas-mail/.env
+ENV_DOSYASI=/opt/aktas-mail/backend/.env
 DAMGA=$(date +%Y%m%d-%H%M%S)
 
 renk() { printf "\033[1;36m%s\033[0m\n" "$*"; }
