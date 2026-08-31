@@ -167,6 +167,7 @@ export interface Passkey {
 export interface Me {
   user: { email: string; displayName: string | null; secondFactor: string };
   domain: string;
+  domains: string[];
   isAdmin: boolean;
 }
 

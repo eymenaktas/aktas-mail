@@ -1,0 +1,67 @@
+#!/bin/bash
+# Aktaş Mail — sınırlı posta kutusu yönetimi; yalnızca sudo üzerinden çağrılır.
+set -euo pipefail
+
+DOMAINS=("akts.tr" "blankreel.com")
+VMAILBOX="/etc/postfix/vmailbox"
+DOVEUSERS="/etc/dovecot/users"
+VHOSTS="/var/mail/vhosts"
+KORUNAN="eymen@akts.tr"
+
+hata() { echo "HATA: $*" >&2; exit 1; }
+
+izinli_domain() {
+  local domain="$1"
+  local candidate
+  for candidate in "${DOMAINS[@]}"; do
+    [[ "$domain" == "$candidate" ]] && return 0
+  done
+  return 1
+}
+
+dogrula() {
+  local address="${1:-}"
+  [[ -n "$address" && ${#address} -le 100 ]] || hata "geçersiz adres"
+  [[ "$address" =~ ^[a-z0-9]([a-z0-9._-]{0,62})@([a-z0-9.-]+)$ ]] || hata "geçersiz adres: $address"
+  [[ "$address" != *".."* ]] || hata "geçersiz adres"
+  izinli_domain "${BASH_REMATCH[2]}" || hata "izin verilmeyen alan adı"
+}
+
+kullanici_kismi() { echo "${1%@*}"; }
+domain_kismi() { echo "${1#*@}"; }
+
+case "${1:-}" in
+  list)
+    [[ -f "$VMAILBOX" ]] && awk "{print \$1}" "$VMAILBOX" || true
+    ;;
+  add)
+    adres="${2:-}"; dogrula "$adres"
+    grep -qiE "^${adres}[[:space:]]" "$VMAILBOX" 2>/dev/null && hata "adres zaten var"
+    IFS= read -r parola || true
+    [[ -n "${parola:-}" && ${#parola} -ge 10 ]] || hata "parola en az 10 karakter olmalı"
+    kul=$(kullanici_kismi "$adres")
+    domain=$(domain_kismi "$adres")
+    hash=$(doveadm pw -s SHA512-CRYPT -p "$parola")
+    unset parola
+    printf "%s\t%s/%s/\n" "$adres" "$domain" "$kul" >> "$VMAILBOX"
+    printf "%s:%s\n" "$adres" "$hash" >> "$DOVEUSERS"
+    postmap "$VMAILBOX"
+    install -d -o vmail -g vmail -m 700 "$VHOSTS/$domain/$kul"/{new,cur,tmp}
+    chown -R vmail:vmail "$VHOSTS/$domain/$kul"
+    systemctl reload postfix >/dev/null 2>&1 || true
+    doveadm reload >/dev/null 2>&1 || true
+    echo "eklendi: $adres"
+    ;;
+  remove)
+    adres="${2:-}"; dogrula "$adres"
+    [[ "$adres" != "$KORUNAN" ]] || hata "admin kutusu silinemez"
+    grep -qiE "^${adres}[[:space:]]" "$VMAILBOX" 2>/dev/null || hata "adres yok"
+    sed -i "\|^${adres}[[:space:]]|d" "$VMAILBOX"
+    sed -i "\|^${adres}:|d" "$DOVEUSERS"
+    postmap "$VMAILBOX"
+    systemctl reload postfix >/dev/null 2>&1 || true
+    doveadm reload >/dev/null 2>&1 || true
+    echo "kaldırıldı: $adres (posta verisi diskte kalır)"
+    ;;
+  *) hata "kullanım: aktasmail-user {list|add <adres>|remove <adres>}" ;;
+esac

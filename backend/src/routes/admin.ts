@@ -3,7 +3,7 @@ import { z } from "zod";
 import { execFile } from "node:child_process";
 import { eq } from "drizzle-orm";
 import { db, schema } from "../db/index.js";
-import { env } from "../env.js";
+import { env, mailDomains } from "../env.js";
 import { unpackSessionCookie } from "../lib/crypto.js";
 import { loadSession } from "../auth/session.js";
 import { audit } from "../lib/audit.js";
@@ -120,6 +120,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.send({
       admin: env.ADMIN_EMAIL,
+      domains: mailDomains,
       users: kutular.map((email) => ({
         email,
         isAdmin: isAdmin(email),

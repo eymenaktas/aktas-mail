@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db, schema } from "../db/index.js";
-import { env, isProd } from "../env.js";
+import { env, isProd, mailDomains } from "../env.js";
 import { verifyCredentials } from "../mail/imap.js";
 import { packSessionCookie, unpackSessionCookie, newSessionKey } from "../lib/crypto.js";
 import {
@@ -39,7 +39,8 @@ function clientIp(req: FastifyRequest): string | null {
 
 /** Uygulama yalnızca kendi alan adının posta kutularına açık. */
 function ayniAlanAdi(email: string): boolean {
-  return email.endsWith("@" + env.MAIL_DOMAIN.toLowerCase());
+  const domain = email.split("@")[1]?.toLowerCase();
+  return domain !== undefined && mailDomains.includes(domain);
 }
 
 export { ayniAlanAdi };
@@ -380,6 +381,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({
       user,
       domain: env.MAIL_DOMAIN,
+      domains: mailDomains,
       isAdmin: session.email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase(),
     });
   });
