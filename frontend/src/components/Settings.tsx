@@ -23,11 +23,13 @@ export function Settings({
   email,
   isAdmin,
   domain,
+  domains,
   onClose,
 }: {
   email: string;
   isAdmin: boolean;
   domain: string;
+  domains: string[];
   onClose: () => void;
 }) {
   const [sekme, setSekme] = useState<Sekme>("profil");
@@ -277,7 +279,7 @@ export function Settings({
             </>
           )}
 
-          {sekme === "kullanicilar" && isAdmin && <AdminUsers domain={domain} />}
+          {sekme === "kullanicilar" && isAdmin && <AdminUsers domain={domain} domains={domains} />}
         </div>
       </div>
     </div>

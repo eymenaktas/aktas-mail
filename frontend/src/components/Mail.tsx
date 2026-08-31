@@ -919,6 +919,7 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
           email={me.user.email}
           isAdmin={me.isAdmin}
           domain={me.domain}
+          domains={me.domains}
           onClose={() => setAyarlar(false)}
         />
       )}

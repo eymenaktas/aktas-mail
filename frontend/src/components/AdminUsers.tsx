@@ -9,10 +9,11 @@ import { api, ApiError, type AdminUser } from "../lib/api.js";
  * yalnızca o çalıştırılabiliyor) ve script girdiyi kendi başına yeniden
  * doğruluyor. Buradaki doğrulama sadece kullanıcıya erken geri bildirim.
  */
-export function AdminUsers({ domain }: { domain: string }) {
+export function AdminUsers({ domain, domains }: { domain: string; domains: string[] }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [ekleAcik, setEkleAcik] = useState(false);
   const [kullanici, setKullanici] = useState("");
+  const [secilenDomain, setSecilenDomain] = useState(domain);
   const [parola, setParola] = useState("");
   /** Yöneticinin KENDİ parolası — her yönetim işleminde yeniden istenir. */
   const [adminParola, setAdminParola] = useState("");
@@ -36,7 +37,7 @@ export function AdminUsers({ domain }: { domain: string }) {
     setHata(null);
     setBilgi(null);
     try {
-      const adres = `${kullanici.trim().toLowerCase()}@${domain}`;
+      const adres = `${kullanici.trim().toLowerCase()}@${secilenDomain}`;
       await api.adminAddUser(adres, parola, adminParola);
       setBilgi(`${adres} açıldı. Kişiye ilk parolasını ilet, kendisi değiştirsin.`);
       setKullanici("");
@@ -140,7 +141,20 @@ export function AdminUsers({ domain }: { domain: string }) {
                 required
                 autoFocus
               />
-              <span className="adres-domain">@{domain}</span>
+              <label className="adres-domain">
+                <span className="sr-only">Alan adı</span>
+                <select
+                  value={secilenDomain}
+                  onChange={(ev) => setSecilenDomain(ev.target.value)}
+                  aria-label="Posta kutusu alan adı"
+                >
+                  {domains.map((availableDomain) => (
+                    <option key={availableDomain} value={availableDomain}>
+                      @{availableDomain}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           </label>
           <label className="field">

@@ -51,7 +51,10 @@ const schema = z.object({
   SMTP_HOST: z.string().default("127.0.0.1"),
   SMTP_PORT: z.coerce.number().int().default(587),
 
+  /** Birincil alan adı; VAPID ve eski istemci uyumluluğu için korunur. */
   MAIL_DOMAIN: z.string().default("akts.tr"),
+  /** Yönetim, giriş ve kutu oluşturma için açıkça izin verilen alan adları. */
+  MAIL_DOMAINS: z.string().default("akts.tr"),
 
   /**
    * Yönetici adresi. DB'den değil env'den okunuyor: veritabanına
@@ -83,3 +86,14 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 export const isProd = env.NODE_ENV === "production";
+
+export const mailDomains = [...new Set(
+  env.MAIL_DOMAINS.split(",")
+    .map((domain) => domain.trim().toLowerCase())
+    .filter((domain) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(domain)),
+)];
+
+if (mailDomains.length === 0) {
+  console.error("Yapılandırma hatası — MAIL_DOMAINS en az bir geçerli alan adı içermeli");
+  process.exit(1);
+}
