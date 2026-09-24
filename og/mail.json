@@ -1,0 +1,9 @@
+{
+  "out": "../frontend/public/og.png",
+  "logo": "../logo.svg",
+  "title": "Aktaş Mail",
+  "subtitle": "akts.tr posta kutusu",
+  "tagline": "Kendi sunucusunda · parolasız giriş · anlık bildirim",
+  "accent": "#5b9bff",
+  "accent2": "#1558d6"
+}
