@@ -72,7 +72,7 @@ async function braveMi(): Promise<boolean> {
   }
 }
 
-export function Bildirimler({ isAdmin = false }: { isAdmin?: boolean }) {
+export function Bildirimler() {
   const [durum, setDurum] = useState<Durum>("yukleniyor");
   const [cihazlar, setCihazlar] = useState<
     Array<{ endpoint: string; label: string | null; lastSentAt: string | null }>
@@ -247,18 +247,12 @@ export function Bildirimler({ isAdmin = false }: { isAdmin?: boolean }) {
               <button className="btn" disabled={calisiyor} onClick={() => void kapat()}>
                 Bu cihazda kapat
               </button>
-              {/* Deneme yalnızca yöneticide: sıradan kullanıcı için
-                  gereksiz, kurulumun çalıştığını zaten ilk mailde görüyor. */}
-              {isAdmin && (
-                <>
-                  <button className="btn btn-primary" onClick={() => void dene()}>
-                    Deneme bildirimi
-                  </button>
-                  <button className="btn" onClick={() => void yerelDene()}>
-                    Yerel deneme
-                  </button>
-                </>
-              )}
+              <button className="btn btn-primary" onClick={() => void dene()}>
+                Deneme bildirimi
+              </button>
+              <button className="btn" onClick={() => void yerelDene()}>
+                Yerel deneme
+              </button>
             </>
           ) : (
             <button className="btn btn-primary" disabled={calisiyor} onClick={() => void ac()}>

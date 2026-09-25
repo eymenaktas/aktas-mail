@@ -72,6 +72,8 @@ async function oturumuCoz(): Promise<Me | null> {
 export function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Açık hesabın yanına yenisi ekleniyor — giriş ekranı vazgeçilebilir. */
+  const [hesapEkle, setHesapEkle] = useState(false);
 
   const check = useCallback(async () => {
     setLoading(true);
@@ -97,9 +99,26 @@ export function App() {
 
   if (!me) return <Login onDone={() => void check()} />;
 
+  if (hesapEkle) {
+    return (
+      <Login
+        onDone={() => {
+          setHesapEkle(false);
+          void check();
+        }}
+        onCancel={() => setHesapEkle(false)}
+      />
+    );
+  }
+
   return (
+    // Hesap değişince Mail sıfırdan kurulsun: klasörler, liste ve canlı
+    // akış önceki hesaba ait kalmasın.
     <Mail
+      key={me.user.email}
       me={me}
+      onHesapEkle={() => setHesapEkle(true)}
+      onHesapDegisti={() => void check()}
       onLogout={() => {
         ipucuYaz(false);
         setMe(null);

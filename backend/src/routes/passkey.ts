@@ -19,7 +19,7 @@ import {
 import { verifyCredentials } from "../mail/imap.js";
 import { packSessionCookie, unpackSessionCookie, newSessionKey } from "../lib/crypto.js";
 import { audit } from "../lib/audit.js";
-import { SESSION_COOKIE, REFRESH_COOKIE, cookieBase, ayniAlanAdi } from "./auth.js";
+import { SESSION_COOKIE, cookieBase, ayniAlanAdi, oturumuYerlestir } from "./auth.js";
 
 /**
  * PAROLASIZ GİRİŞ — PC ve mobilde aynı akış.
@@ -119,7 +119,10 @@ export async function passkeyRoutes(app: FastifyInstance): Promise<void> {
     { config: { rateLimit: { max: 10, timeWindow: "10 minutes" } } },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = z
-        .object({ password: z.string().min(1).max(512) })
+        .object({
+          password: z.string().min(1).max(512),
+          remember: z.boolean().default(true),
+        })
         .safeParse(req.body);
       if (!body.success) return reply.code(400).send({ error: "Geçersiz istek" });
 
@@ -165,17 +168,17 @@ export async function passkeyRoutes(app: FastifyInstance): Promise<void> {
       await discardPendingLogin(unpacked.sessionId);
 
       const sessionKey = newSessionKey();
-      const { sessionId, refreshToken } = await issueSession({
+      const yeni = await issueSession({
         userId: user.id,
         deviceId: null,
         imapPassword: body.data.password,
         sessionKey,
         ip: req.ip,
+        remember: body.data.remember,
       });
 
       reply.clearCookie(PASSKEY_PENDING_COOKIE, cookieBase);
-      reply.setCookie(SESSION_COOKIE, packSessionCookie(sessionId, sessionKey), cookieBase);
-      reply.setCookie(REFRESH_COOKIE, refreshToken, cookieBase);
+      await oturumuYerlestir(req, reply, user.id, yeni);
 
       await audit({ userId: user.id, action: "login.ok", detail: "passkey", ip: req.ip });
 

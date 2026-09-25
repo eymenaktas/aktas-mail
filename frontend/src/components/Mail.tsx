@@ -54,7 +54,18 @@ function tarih(iso: string | null): string {
  */
 const SAYFA_BOYU = 50;
 
-export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
+export function Mail({
+  me,
+  onLogout,
+  onHesapEkle,
+  onHesapDegisti,
+}: {
+  me: Me;
+  onLogout: () => void;
+  onHesapEkle: () => void;
+  /** Başka hesaba geçildi ya da çıkışta sıradaki hesap etkinleşti. */
+  onHesapDegisti: () => void;
+}) {
   const [boxes, setBoxes] = useState<Mailbox[]>([]);
   const [mailbox, setMailbox] = useState("INBOX");
   const [messages, setMessages] = useState<MessageSummary[]>([]);
@@ -302,9 +313,19 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [yukle, loading, menuAcik, tamEkran]);
 
-  async function cikis() {
-    await api.logout().catch(() => {});
-    onLogout();
+  /** Etkin hesaptan çıkar; tarayıcıda başka hesap açıksa ona geçer. */
+  async function cikis(tumu = false) {
+    const r = await api.logout(tumu).catch(() => null);
+    if (r?.devam) onHesapDegisti();
+    else onLogout();
+  }
+
+  async function hesabaGec(email: string) {
+    setMenuAcik(false);
+    // Başarısızsa o hesabın oturumu düşmüştür; yeniden okumak onu
+    // listeden ayıklıyor, ayrıca hata göstermeye gerek yok.
+    await api.switchAccount(email).catch(() => {});
+    onHesapDegisti();
   }
 
   function yanitla(msg: MessageDetail, hazirMetin?: string) {
@@ -568,6 +589,31 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <span>{me.user.email}</span>
             </div>
           </div>
+          {/* Bu tarayıcıda açık diğer hesaplar — dokununca parolasız geçiş */}
+          <div className="hesaplar">
+            {me.hesaplar.map((h) => (
+              <button
+                key={h.email}
+                className="hesap"
+                onClick={() => void hesabaGec(h.email)}
+                title={`${h.email} hesabına geç`}
+              >
+                <span className="avatar-sm">{h.email.charAt(0).toUpperCase()}</span>
+                <span className="hesap-adres">{h.email}</span>
+              </button>
+            ))}
+            <button
+              className="hesap"
+              onClick={() => {
+                setMenuAcik(false);
+                onHesapEkle();
+              }}
+              title="Hesap ekle"
+            >
+              <span className="avatar-sm hesap-arti" aria-hidden="true">+</span>
+              <span className="hesap-adres">Hesap ekle</span>
+            </button>
+          </div>
           <div className="foot-actions">
             <button
               className="btn-link"
@@ -584,6 +630,11 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <button className="btn-link" onClick={() => void cikis()}>
               Çıkış yap
             </button>
+            {me.hesaplar.length > 0 && (
+              <button className="btn-link" onClick={() => void cikis(true)}>
+                Tümünden çık
+              </button>
+            )}
           </div>
         </div>
       </aside>
@@ -635,8 +686,10 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
             </button>
           )}
 
-          {/* Okunmamış varsa göster; hepsi okunmuşsa düğme gereksiz yer kaplar */}
-          {gosterilen.some((m) => !m.seen) && (
+          {/* Klasörde okunmamış varsa göster — yalnızca ekrandaki sayfaya
+              bakınca ilk 50'si okunmuş kutularda düğme hiç çıkmıyordu. */}
+          {(gosterilen.some((m) => !m.seen) ||
+            (boxes.find((b) => b.path === mailbox)?.unseen ?? 0) > 0) && (
             <button
               className="icon-btn"
               onClick={() => void tumunuOku()}

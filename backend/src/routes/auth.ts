@@ -13,6 +13,9 @@ import {
   rotateRefreshToken,
   revokeSession,
   loadSession,
+  extendSessions,
+  REFRESH_TTL_MS,
+  type IssuedSession,
 } from "../auth/session.js";
 import {
   verifyUserTotp,
@@ -25,6 +28,15 @@ import { audit } from "../lib/audit.js";
 const SESSION_COOKIE = "am_session";
 const REFRESH_COOKIE = "am_refresh";
 const PENDING_COOKIE = "am_pending";
+/**
+ * Aynı tarayıcıda açık DİĞER hesaplar. Etkin hesap her zaman
+ * `am_session`'da; geçiş yapınca ikisi yer değiştiriyor. Böylece
+ * oturum okuyan diğer uçların hiçbiri çoklu hesaptan haberdar olmak
+ * zorunda kalmıyor.
+ */
+const ACCOUNTS_COOKIE = "am_hesaplar";
+/** Bir tarayıcıda en fazla bu kadar hesap — çerez 4 KB'ı aşmasın. */
+const EN_FAZLA_HESAP = 6;
 
 const cookieBase = {
   httpOnly: true, // JS okuyamaz — XSS'te token çalınamaz
@@ -35,6 +47,103 @@ const cookieBase = {
 
 function clientIp(req: FastifyRequest): string | null {
   return req.ip || null;
+}
+
+/** Çerezde duran bir oturum: `id.anahtar`, refresh token, hatırla bayrağı. */
+interface CerezOturum {
+  packed: string;
+  refresh: string;
+  remember: boolean;
+}
+
+type CozulmusOturum = CerezOturum & {
+  sessionId: string;
+  session: NonNullable<Awaited<ReturnType<typeof loadSession>>>;
+};
+
+/**
+ * Hatırlanan oturumun çerezi kalıcı: `maxAge` yoksa tarayıcı çerezi
+ * kapanışta siliyordu ve telefonda uygulama her kapandığında oturum
+ * düşüyordu (sunucudaki kayıt 30 gün geçerli olduğu hâlde).
+ */
+function cerezSecenek(remember: boolean) {
+  return remember ? { ...cookieBase, maxAge: REFRESH_TTL_MS / 1000 } : cookieBase;
+}
+
+function aktifYaz(reply: FastifyReply, o: CerezOturum): void {
+  reply.setCookie(SESSION_COOKIE, o.packed, cerezSecenek(o.remember));
+  reply.setCookie(REFRESH_COOKIE, o.refresh, cerezSecenek(o.remember));
+}
+
+function digerleriniYaz(reply: FastifyReply, liste: CerezOturum[]): void {
+  if (liste.length === 0) {
+    reply.clearCookie(ACCOUNTS_COOKIE, cookieBase);
+    return;
+  }
+  const deger = liste.map((o) => `${o.packed}~${o.refresh}~${o.remember ? 1 : 0}`).join(",");
+  reply.setCookie(ACCOUNTS_COOKIE, deger, cerezSecenek(liste.some((o) => o.remember)));
+}
+
+function digerleriniOku(req: FastifyRequest): CerezOturum[] {
+  const ham = req.cookies[ACCOUNTS_COOKIE];
+  if (!ham) return [];
+  return ham
+    .split(",")
+    .map((parca) => parca.split("~"))
+    .filter((p): p is [string, string, string] => p.length === 3 && !!p[0] && !!p[1])
+    .map(([packed, refresh, r]) => ({ packed, refresh, remember: r === "1" }))
+    .slice(0, EN_FAZLA_HESAP);
+}
+
+async function coz(o: Omit<CerezOturum, "remember">): Promise<CozulmusOturum | null> {
+  const un = unpackSessionCookie(o.packed);
+  if (!un) return null;
+  const session = await loadSession(un.sessionId, un.sessionKey);
+  if (!session) return null;
+  return { ...o, remember: session.remember, sessionId: un.sessionId, session };
+}
+
+/** Etkin hesap + diğerleri, geçersiz olanlar ayıklanmış. */
+async function hesaplariCoz(req: FastifyRequest): Promise<{
+  aktif: CozulmusOturum | null;
+  digerleri: CozulmusOturum[];
+}> {
+  const packed = req.cookies[SESSION_COOKIE];
+  const refresh = req.cookies[REFRESH_COOKIE] ?? "";
+  const aktif = packed ? await coz({ packed, refresh }) : null;
+  const digerleri = (await Promise.all(digerleriniOku(req).map(coz))).filter(
+    (o): o is CozulmusOturum =>
+      o !== null && o.sessionId !== aktif?.sessionId && o.session.userId !== aktif?.session.userId,
+  );
+  return { aktif, digerleri };
+}
+
+/**
+ * Yeni oturumu etkin yapar. Tarayıcıda açık olan önceki hesap
+ * kapatılmıyor, "diğer hesaplar"a geçiyor — aynı anda birden fazla
+ * hesap açık kalabiliyor. Aynı hesabın eski oturumu varsa o kapatılıyor.
+ */
+async function oturumuYerlestir(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  userId: number,
+  yeni: IssuedSession,
+): Promise<void> {
+  const { aktif, digerleri } = await hesaplariCoz(req);
+  const eskiler = [...(aktif ? [aktif] : []), ...digerleri];
+
+  const ayniHesap = eskiler.filter((o) => o.session.userId === userId);
+  await Promise.all(ayniHesap.map((o) => revokeSession(o.sessionId)));
+
+  aktifYaz(reply, {
+    packed: packSessionCookie(yeni.sessionId, yeni.sessionKey),
+    refresh: yeni.refreshToken,
+    remember: yeni.remember,
+  });
+  digerleriniYaz(
+    reply,
+    eskiler.filter((o) => o.session.userId !== userId).slice(0, EN_FAZLA_HESAP - 1),
+  );
 }
 
 /** Uygulama yalnızca kendi alan adının posta kutularına açık. */
@@ -62,6 +171,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         .object({
           email: z.string().email().max(254),
           password: z.string().min(1).max(512),
+          remember: z.boolean().default(true),
         })
         .safeParse(req.body);
 
@@ -119,16 +229,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         user.secondFactor === "totp" || user.secondFactor === "device";
 
       if (!ikinciFaktorGerek) {
-        const { sessionId, sessionKey, refreshToken } = await issueSession({
+        const yeni = await issueSession({
           userId: user.id,
           deviceId: null,
           imapPassword: body.data.password,
           sessionKey: newSessionKey(),
           ip,
+          remember: body.data.remember,
         });
-
-        reply.setCookie(SESSION_COOKIE, packSessionCookie(sessionId, sessionKey), cookieBase);
-        reply.setCookie(REFRESH_COOKIE, refreshToken, cookieBase);
+        await oturumuYerlestir(req, reply, user.id, yeni);
 
         await audit({
           userId: user.id,
@@ -186,13 +295,22 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = z
         .discriminatedUnion("method", [
-          z.object({ method: z.literal("totp"), token: z.string().max(16) }),
+          z.object({
+            method: z.literal("totp"),
+            token: z.string().max(16),
+            remember: z.boolean().default(true),
+          }),
           z.object({
             method: z.literal("device"),
             deviceId: z.number().int().positive(),
             signature: z.string().max(2048),
+            remember: z.boolean().default(true),
           }),
-          z.object({ method: z.literal("recovery"), code: z.string().max(64) }),
+          z.object({
+            method: z.literal("recovery"),
+            code: z.string().max(64),
+            remember: z.boolean().default(true),
+          }),
         ])
         .safeParse(req.body);
 
@@ -242,18 +360,18 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
       await discardPendingLogin(unpacked.sessionId);
 
-      const { sessionId, sessionKey, refreshToken } = await issueSession({
+      const yeni = await issueSession({
         userId: pending.userId,
         deviceId,
         imapPassword: pending.imapPassword,
         // Aynı anahtarı devral: parolayı yeniden şifrelemek gerekmiyor
         sessionKey: unpacked.sessionKey,
         ip,
+        remember: body.data.remember,
       });
 
       reply.clearCookie(PENDING_COOKIE, cookieBase);
-      reply.setCookie(SESSION_COOKIE, packSessionCookie(sessionId, sessionKey), cookieBase);
-      reply.setCookie(REFRESH_COOKIE, refreshToken, cookieBase);
+      await oturumuYerlestir(req, reply, pending.userId, yeni);
 
       await audit({
         userId: pending.userId,
@@ -298,27 +416,65 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(401).send({ error: "Oturum geçersiz" });
     }
 
-    reply.setCookie(
-      SESSION_COOKIE,
-      packSessionCookie(result.sessionId, result.sessionKey),
-      cookieBase,
-    );
-    reply.setCookie(REFRESH_COOKIE, result.refreshToken, cookieBase);
+    aktifYaz(reply, {
+      packed: packSessionCookie(result.sessionId, result.sessionKey),
+      refresh: result.refreshToken,
+      remember: result.remember,
+    });
 
     return reply.send({ status: "ok", expiresAt: result.expiresAt.toISOString() });
   });
 
+  /**
+   * Çıkış. Varsayılan olarak yalnızca etkin hesaptan çıkılır; tarayıcıda
+   * başka hesap açıksa o etkin olur. `tumu: true` hepsinden çıkar.
+   */
   app.post("/api/auth/logout", async (req: FastifyRequest, reply: FastifyReply) => {
+    const body = z.object({ tumu: z.boolean().default(false) }).safeParse(req.body ?? {});
+    const tumu = body.success && body.data.tumu;
+
     const sessionCookie = req.cookies[SESSION_COOKIE];
     const unpacked = sessionCookie ? unpackSessionCookie(sessionCookie) : null;
+    const { digerleri } = await hesaplariCoz(req);
 
     if (unpacked) {
       await revokeSession(unpacked.sessionId);
       await audit({ action: "logout", ip: clientIp(req) });
     }
 
+    if (tumu) {
+      await Promise.all(digerleri.map((o) => revokeSession(o.sessionId)));
+      digerleri.length = 0;
+    }
+
+    const [sonraki, ...kalan] = digerleri;
+    if (sonraki) {
+      aktifYaz(reply, sonraki);
+      digerleriniYaz(reply, kalan);
+      return reply.send({ status: "ok", devam: sonraki.session.email });
+    }
+
     reply.clearCookie(SESSION_COOKIE, cookieBase);
     reply.clearCookie(REFRESH_COOKIE, cookieBase);
+    reply.clearCookie(ACCOUNTS_COOKIE, cookieBase);
+    return reply.send({ status: "ok" });
+  });
+
+  /** Tarayıcıda açık başka bir hesaba geç — parola sorulmaz. */
+  app.post("/api/auth/switch", async (req: FastifyRequest, reply: FastifyReply) => {
+    const body = z.object({ email: z.string().email().max(254) }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "Geçersiz istek" });
+
+    const { aktif, digerleri } = await hesaplariCoz(req);
+    const hedef = digerleri.find(
+      (o) => o.session.email.toLowerCase() === body.data.email.toLowerCase(),
+    );
+    if (!hedef) return reply.code(404).send({ error: "Bu hesabın oturumu kapanmış" });
+
+    aktifYaz(reply, hedef);
+    digerleriniYaz(reply, [...(aktif ? [aktif] : []), ...digerleri.filter((o) => o !== hedef)]);
+
+    await audit({ userId: hedef.session.userId, action: "session.switch", ip: clientIp(req) });
     return reply.send({ status: "ok" });
   });
 
@@ -361,12 +517,18 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.get("/api/auth/me", async (req: FastifyRequest, reply: FastifyReply) => {
-    const sessionCookie = req.cookies[SESSION_COOKIE];
-    const unpacked = sessionCookie ? unpackSessionCookie(sessionCookie) : null;
-    if (!unpacked) return reply.code(401).send({ error: "Oturum yok" });
+    if (!req.cookies[SESSION_COOKIE]) return reply.code(401).send({ error: "Oturum yok" });
 
-    const session = await loadSession(unpacked.sessionId, unpacked.sessionKey);
-    if (!session) return reply.code(401).send({ error: "Oturum geçersiz" });
+    const { aktif, digerleri } = await hesaplariCoz(req);
+    if (!aktif) return reply.code(401).send({ error: "Oturum geçersiz" });
+    const session = aktif.session;
+
+    // Uygulama her açıldığında süre baştan başlar; çerezler de yeniden
+    // yazılıyor ki tarayıcı tarafındaki 30 gün de kaysın. Düşmüş diğer
+    // hesaplar bu yazımla çerezden ayıklanmış oluyor.
+    await extendSessions([aktif, ...digerleri].map((o) => o.sessionId));
+    aktifYaz(reply, aktif);
+    digerleriniYaz(reply, digerleri);
 
     const [user] = await db
       .select({
@@ -380,6 +542,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.send({
       user,
+      hesaplar: digerleri.map((o) => ({
+        email: o.session.email,
+        displayName: o.session.displayName,
+      })),
       domain: env.MAIL_DOMAIN,
       domains: mailDomains,
       isAdmin: session.email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase(),
@@ -387,4 +553,4 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 }
 
-export { SESSION_COOKIE, REFRESH_COOKIE, cookieBase };
+export { SESSION_COOKIE, REFRESH_COOKIE, cookieBase, oturumuYerlestir };

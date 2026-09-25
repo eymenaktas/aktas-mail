@@ -166,6 +166,8 @@ export interface Passkey {
 
 export interface Me {
   user: { email: string; displayName: string | null; secondFactor: string };
+  /** Bu tarayıcıda açık diğer hesaplar — parolasız geçilebilir. */
+  hesaplar: Array<{ email: string; displayName: string | null }>;
   domain: string;
   domains: string[];
   isAdmin: boolean;
@@ -194,25 +196,40 @@ export const api = {
 
   me: () => request<Me>("/api/auth/me"),
 
-  login: (email: string, password: string) =>
+  /** remember: "Beni hatırla" — tarayıcı kapansa da oturum kalır. */
+  login: (email: string, password: string, remember: boolean) =>
     request<LoginResult>("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, remember }),
     }),
 
-  loginTotp: (token: string) =>
+  loginTotp: (token: string, remember: boolean) =>
     request<{ status: string }>("/api/auth/login/2fa", {
       method: "POST",
-      body: JSON.stringify({ method: "totp", token }),
+      body: JSON.stringify({ method: "totp", token, remember }),
     }),
 
-  loginRecovery: (code: string) =>
+  loginRecovery: (code: string, remember: boolean) =>
     request<{ status: string }>("/api/auth/login/2fa", {
       method: "POST",
-      body: JSON.stringify({ method: "recovery", code }),
+      body: JSON.stringify({ method: "recovery", code, remember }),
     }),
 
-  logout: () => request<{ status: string }>("/api/auth/logout", { method: "POST" }),
+  /**
+   * Etkin hesaptan çıkar. Tarayıcıda başka hesap açıksa `devam` onun
+   * adresi olur ve o hesap etkinleşir. `tumu` hepsinden çıkar.
+   */
+  logout: (tumu = false) =>
+    request<{ status: string; devam?: string }>("/api/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({ tumu }),
+    }),
+
+  switchAccount: (email: string) =>
+    request<{ status: string }>("/api/auth/switch", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
 
   /** Passkey eklemeden önce yeniden kimlik doğrulama. */
   verifyPassword: (password: string) =>
@@ -260,10 +277,10 @@ export const api = {
       body: JSON.stringify({ response }),
     }),
 
-  passkeyLoginComplete: (password: string) =>
+  passkeyLoginComplete: (password: string, remember: boolean) =>
     request<{ status: string; user: { email: string; displayName: string | null } }>(
       "/api/auth/passkey/login/complete",
-      { method: "POST", body: JSON.stringify({ password }) },
+      { method: "POST", body: JSON.stringify({ password, remember }) },
     ),
 
   passkeyRegisterOptions: () =>

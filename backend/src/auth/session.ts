@@ -1,4 +1,4 @@
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, inArray, lt } from "drizzle-orm";
 import { db, schema } from "../db/index.js";
 import {
   randomToken,
@@ -11,11 +11,13 @@ import { audit } from "../lib/audit.js";
 
 /**
  * Oturum ömrü.
- * Mobilde "çıkış yapana kadar hatırla" davranışı, refresh token'ın
- * her kullanımda YENİLENMESİNDEN geliyor: kullanıcı uygulamayı açtıkça
- * süre baştan başlar, çıkış yapana kadar oturum kapanmaz.
+ * "Çıkış yapana kadar hatırla" davranışı sürenin KAYMASINDAN geliyor:
+ * uygulama her açıldığında (`/api/auth/me`) süre baştan başlar, yani
+ * 30 gün hiç açılmayan oturum düşer, kullanılan oturum düşmez.
  */
-const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 gün
+export const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 gün
+/** Süre bundan sık uzatılmaz — her istekte DB'ye yazmamak için. */
+const UZATMA_ARALIGI_MS = 24 * 60 * 60 * 1000;
 const PENDING_TTL_MS = 5 * 60 * 1000; // 5 dakika
 
 export interface IssuedSession {
@@ -23,6 +25,7 @@ export interface IssuedSession {
   sessionKey: string;
   refreshToken: string;
   expiresAt: Date;
+  remember: boolean;
 }
 
 /** Parola doğrulandı, ikinci faktör bekleniyor. */
@@ -98,10 +101,12 @@ export async function issueSession(params: {
   sessionKey: string;
   ip: string | null;
   previousId?: string;
+  remember?: boolean;
 }): Promise<IssuedSession> {
   const sessionId = randomToken(24);
   const refreshToken = randomToken(32);
   const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
+  const remember = params.remember ?? true;
 
   await db.insert(schema.sessions).values({
     id: sessionId,
@@ -110,22 +115,32 @@ export async function issueSession(params: {
     imapPasswordEnc: encrypt(params.imapPassword, params.sessionKey),
     refreshTokenHash: sha256(refreshToken),
     previousId: params.previousId ?? null,
+    remember,
     expiresAt,
     createdIp: params.ip,
   });
 
-  return { sessionId, sessionKey: params.sessionKey, refreshToken, expiresAt };
+  return { sessionId, sessionKey: params.sessionKey, refreshToken, expiresAt, remember };
 }
 
 /** Aktif oturumu ve çözülmüş IMAP parolasını getirir. */
 export async function loadSession(
   sessionId: string,
   sessionKey: string,
-): Promise<{ userId: number; email: string; imapPassword: string } | null> {
+): Promise<{
+  userId: number;
+  email: string;
+  displayName: string | null;
+  imapPassword: string;
+  remember: boolean;
+  expiresAt: Date;
+} | null> {
   const [row] = await db
     .select({
       userId: schema.sessions.userId,
       email: schema.users.email,
+      displayName: schema.users.displayName,
+      remember: schema.sessions.remember,
       imapPasswordEnc: schema.sessions.imapPasswordEnc,
       expiresAt: schema.sessions.expiresAt,
       revokedAt: schema.sessions.revokedAt,
@@ -143,7 +158,10 @@ export async function loadSession(
     return {
       userId: row.userId,
       email: row.email,
+      displayName: row.displayName,
       imapPassword: decrypt(row.imapPasswordEnc, sessionKey),
+      remember: row.remember,
+      expiresAt: row.expiresAt,
     };
   } catch {
     return null;
@@ -207,7 +225,28 @@ export async function rotateRefreshToken(params: {
     sessionKey: params.sessionKey,
     ip: params.ip,
     previousId: params.sessionId,
+    remember: row.remember,
   });
+}
+
+/**
+ * Hatırlanan oturumların süresini baştan başlatır.
+ * Yalnızca son uzatmanın üstünden bir gün geçmişse yazar.
+ */
+export async function extendSessions(sessionIds: string[]): Promise<void> {
+  if (sessionIds.length === 0) return;
+  const now = Date.now();
+  await db
+    .update(schema.sessions)
+    .set({ expiresAt: new Date(now + REFRESH_TTL_MS) })
+    .where(
+      and(
+        inArray(schema.sessions.id, sessionIds),
+        eq(schema.sessions.remember, true),
+        isNull(schema.sessions.revokedAt),
+        lt(schema.sessions.expiresAt, new Date(now + REFRESH_TTL_MS - UZATMA_ARALIGI_MS)),
+      ),
+    );
 }
 
 export async function revokeSession(sessionId: string): Promise<void> {

@@ -177,7 +177,7 @@ export function Settings({
           {sekme === "bildirim" && (
             <>
               <h3>Bildirimler</h3>
-              <Bildirimler isAdmin={isAdmin} />
+              <Bildirimler />
             </>
           )}
 

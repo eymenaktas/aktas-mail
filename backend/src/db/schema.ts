@@ -220,6 +220,12 @@ export const sessions = pgTable(
     previousId: text("previous_id"),
 
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /**
+     * "Beni hatırla": true ise çerez kalıcı (tarayıcı kapanınca silinmez)
+     * ve süre her açılışta baştan başlar. false ise çerez tarayıcı
+     * oturumuyla ölür.
+     */
+    remember: boolean("remember").notNull().default(true),
     /** Doluysa ve tekrar kullanılırsa: hırsızlık → tüm oturumlar kapanır. */
     usedAt: timestamp("used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),

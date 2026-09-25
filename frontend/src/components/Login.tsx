@@ -6,8 +6,14 @@ import { ThemeToggle } from "./ThemeToggle.js";
 
 type Step = "start" | "password" | "totp" | "recovery";
 
-export function Login({ onDone }: { onDone: () => void }) {
+/**
+ * `onCancel` verilirse ekran "hesap ekle" kipinde: zaten açık bir hesap
+ * var, yenisi onun yanına ekleniyor ve vazgeçip geri dönülebiliyor.
+ */
+export function Login({ onDone, onCancel }: { onDone: () => void; onCancel?: () => void }) {
   const [step, setStep] = useState<Step>("start");
+  /** "Beni hatırla" — kapalıysa oturum tarayıcı kapanınca biter. */
+  const [hatirla, setHatirla] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -47,7 +53,7 @@ export function Login({ onDone }: { onDone: () => void }) {
 
       // Sarmal burada, tarayıcıda çözülüyor. Sunucu çözemez.
       const pass = await unwrapPassword(verified.wrappedSecret, prfOutput);
-      await api.passkeyLoginComplete(pass);
+      await api.passkeyLoginComplete(pass, hatirla);
       onDone();
     } catch (err) {
       // Kullanıcı passkey ekranını kapattıysa bu bir hata değil
@@ -66,7 +72,7 @@ export function Login({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const result = await api.login(email.trim(), password);
+      const result = await api.login(email.trim(), password, hatirla);
       if (result.status === "ok") {
         onDone();
         return;
@@ -85,8 +91,8 @@ export function Login({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      if (step === "totp") await api.loginTotp(code.trim());
-      else await api.loginRecovery(code.trim());
+      if (step === "totp") await api.loginTotp(code.trim(), hatirla);
+      else await api.loginRecovery(code.trim(), hatirla);
       onDone();
     } catch (err) {
       fail(err);
@@ -95,6 +101,17 @@ export function Login({ onDone }: { onDone: () => void }) {
     }
   }
 
+  const hatirlaKutusu = (
+    <label className="hatirla">
+      <input
+        type="checkbox"
+        checked={hatirla}
+        onChange={(e) => setHatirla(e.target.checked)}
+      />
+      <span>Beni hatırla</span>
+    </label>
+  );
+
   return (
     <div className="login">
       <div className="login-card">
@@ -102,7 +119,7 @@ export function Login({ onDone }: { onDone: () => void }) {
           <Logo size={44} />
           <ThemeToggle />
         </div>
-        <h1>Aktaş Mail</h1>
+        <h1>{onCancel ? "Hesap ekle" : "Aktaş Mail"}</h1>
 
         {step === "start" && (
           <>
@@ -117,6 +134,7 @@ export function Login({ onDone }: { onDone: () => void }) {
             <button className="btn-link" onClick={() => setStep("password")}>
               Parolayla gir
             </button>
+            {hatirlaKutusu}
           </>
         )}
 
@@ -146,6 +164,7 @@ export function Login({ onDone }: { onDone: () => void }) {
                 autoFocus={!!email}
               />
             </label>
+            {hatirlaKutusu}
             <button className="btn btn-primary btn-lg" disabled={busy}>
               {busy ? "Kontrol ediliyor…" : "Giriş"}
             </button>
@@ -191,6 +210,12 @@ export function Login({ onDone }: { onDone: () => void }) {
         )}
 
         {error && <p className="login-error">{error}</p>}
+
+        {onCancel && (
+          <button type="button" className="btn-link" onClick={onCancel}>
+            Vazgeç, hesabıma dön
+          </button>
+        )}
       </div>
     </div>
   );
