@@ -5,7 +5,8 @@ Güncelleme: 2026-09-25 08:30 | Son araç: claude
 ## Hedef
 
 Telefonda "beni hatırla", aynı tarayıcıda çoklu hesap + geçiş, hızlı
-çıkışların giderilmesi. **Canlıda, ama commit'lenmedi** (main'de, kirli ağaç).
+çıkışların giderilmesi. Canlıda; `coklu-hesap-hatirla` dalında commit'li ve push'lu (cc6f9ac),
+main'e birleştirilmedi.
 
 ## Yapıldı
 
@@ -25,8 +26,8 @@ Telefonda "beni hatırla", aynı tarayıcıda çoklu hesap + geçiş, hızlı
 
 ## Sıradaki adım
 
-Eymen onaylarsa commit + push (main'de: önce dal aç). Canlı, HEAD'in önünde —
-HEAD'den derleyip atma, bu değişiklikler geri gider.
+`coklu-hesap-hatirla`'yı main'e birleştirmek (Eymen isterse). Canlı bu dalla birebir aynı
+(2026-09-25 `rsync -rcn` ile doğrulandı); main'den derleyip atma, değişiklikler geri gider.
 
 ## Bilinen tuzaklar
 
