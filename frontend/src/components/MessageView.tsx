@@ -235,29 +235,63 @@ export function MessageView({
   */
 
   if (error) return <div className="reader"><p className="empty">{error}</p></div>;
-  if (!msg) return <div className="reader"><p className="empty">Yükleniyor…</p></div>;
+  if (!msg)
+    return (
+      <div className="reader" aria-busy="true" aria-label="Yükleniyor…">
+        <div className="iskelet-okuyucu">
+          <span className="iskelet iskelet-cizgi" style={{ width: "58%", height: 22 }} />
+          <div className="iskelet-satir">
+            <span className="iskelet iskelet-avatar" style={{ width: 40, height: 40 }} />
+            <div className="iskelet-govde">
+              <span className="iskelet iskelet-cizgi" style={{ width: "34%" }} />
+              <span className="iskelet iskelet-cizgi soluk" style={{ width: "48%" }} />
+            </div>
+          </div>
+          <span className="iskelet iskelet-blok" />
+        </div>
+      </div>
+    );
 
   const from = msg.from;
 
+  /** Yıldız anında dönsün; sunucu reddederse geri al. */
+  function yildizla() {
+    if (!msg) return;
+    const yeni = !msg.flagged;
+    setMsg({ ...msg, flagged: yeni });
+    api.setFlag(msg.uid, "flagged", yeni, mailbox).catch(() => {
+      setMsg((m) => (m ? { ...m, flagged: !yeni } : m));
+    });
+  }
 
   return (
-    <div className="reader">
+    // key: başka maile geçince giriş animasyonu yeniden oynasın
+    <div className="reader reader-giris" key={msg.uid}>
       <div className="reader-bar">
         <button className="icon-btn" onClick={onClose} title="Kapat (Esc)">
           ✕
         </button>
         <div className="spacer" />
         <button
-          className="icon-btn"
-          onClick={() => void api.setFlag(msg.uid, "flagged", !msg.flagged, mailbox)}
+          className={`icon-btn yildiz-dugme ${msg.flagged ? "is-yildizli" : ""}`}
+          onClick={yildizla}
           title="Yıldızla (s)"
+          aria-pressed={msg.flagged}
         >
-          {msg.flagged ? "★" : "☆"}
+          <span key={String(msg.flagged)}>{msg.flagged ? "★" : "☆"}</span>
         </button>
-        <button className="btn btn-ghost" onClick={() => onReply(msg)}>
+        <button className="btn btn-ghost btn-ikonlu" onClick={() => onReply(msg)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 14L4 9l5-5" />
+            <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+          </svg>
           Yanıtla
         </button>
-        <button className="btn btn-ghost" onClick={() => onForward(msg)}>
+        <button className="btn btn-ghost btn-ikonlu btn-ilet" onClick={() => onForward(msg)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M15 14l5-5-5-5" />
+            <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+          </svg>
           İlet
         </button>
         {/* Tam ekran yalnızca masaüstünde anlamlı; telefonda okuma

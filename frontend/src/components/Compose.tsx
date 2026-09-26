@@ -25,6 +25,15 @@ export function Compose({
   const [text, setText] = useState(draft.text);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Kapanış animasyonu oynarken true; bitince asıl `onClose` çağrılıyor. */
+  const [kapaniyor, setKapaniyor] = useState(false);
+
+  function kapat() {
+    if (kapaniyor) return;
+    // Hareket azaltılmışsa animasyon yok, beklemeden kapat
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) onClose();
+    else setKapaniyor(true);
+  }
 
   /** "a@b.c, d@e.f" → ["a@b.c","d@e.f"] */
   function adresler(s: string): string[] {
@@ -66,10 +75,16 @@ export function Compose({
 
   return (
     <div className="compose-wrap" role="dialog" aria-label="Yeni mesaj">
-      <form className="compose" onSubmit={(e) => void gonder(e)}>
+      <form
+        className={`compose ${kapaniyor ? "is-kapaniyor" : ""}`}
+        onSubmit={(e) => void gonder(e)}
+        onAnimationEnd={(e) => {
+          if (kapaniyor && e.target === e.currentTarget) onClose();
+        }}
+      >
         <div className="compose-bar">
           <span>Yeni mesaj</span>
-          <button type="button" className="icon-btn" onClick={onClose} title="Kapat">
+          <button type="button" className="icon-btn" onClick={kapat} title="Kapat">
             ✕
           </button>
         </div>
@@ -121,10 +136,14 @@ export function Compose({
         {error && <p className="compose-error">{error}</p>}
 
         <div className="compose-foot">
-          <button className="btn btn-primary" disabled={busy}>
+          <button className={`btn btn-primary gonder-dugme ${busy ? "is-gidiyor" : ""}`} disabled={busy}>
             {busy ? "Gönderiliyor…" : "Gönder"}
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M22 2L11 13" />
+              <path d="M22 2l-7 20-4-9-9-4 20-7z" />
+            </svg>
           </button>
-          <button type="button" className="btn-link" onClick={onClose}>
+          <button type="button" className="btn-link" onClick={kapat}>
             Vazgeç
           </button>
         </div>

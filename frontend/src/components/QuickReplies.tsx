@@ -72,8 +72,13 @@ export function QuickReplies({
   return (
     <div className="hazir-cevaplar">
       <span className="hazir-baslik">Hazır cevap:</span>
-      {oneriler.map((c) => (
-        <button key={c} className="hazir-dugme" onClick={() => onSec(c)}>
+      {oneriler.map((c, i) => (
+        <button
+          key={c}
+          className="hazir-dugme"
+          style={{ animationDelay: `${120 + i * 60}ms` }}
+          onClick={() => onSec(c)}
+        >
           {c}
         </button>
       ))}

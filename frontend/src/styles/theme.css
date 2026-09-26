@@ -198,5 +198,7 @@ a {
   * {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+    /* Sonsuz döngüler (nabız, parıltı) 0.01ms'de dönüp işlemciyi yormasın */
+    animation-iteration-count: 1 !important;
   }
 }

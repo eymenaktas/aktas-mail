@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, type CSSProperties } from "react";
 import { api, type Me, type Mailbox, type MessageSummary, type MessageDetail, type SenderAvatar, type Bakim } from "../lib/api.js";
 import { Avatar } from "./Avatar.js";
 import { PROFIL_DEGISTI } from "./ProfilePhoto.js";
@@ -551,7 +551,12 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <span className="folder-ico">{kutuIkon(b)}</span>
               <span className="folder-name">{kutuAdi(b)}</span>
               {/* Okunmamış sayısı — Gmail'de olduğu gibi klasör adı da kalınlaşır */}
-              {b.unseen > 0 && <span className="folder-unseen">{b.unseen}</span>}
+              {/* key: sayı değişince rozet yeniden "zıplasın" */}
+              {b.unseen > 0 && (
+                <span key={b.unseen} className="folder-unseen">
+                  {b.unseen}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -605,20 +610,36 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <path d="M3 18h18" />
             </svg>
           </button>
-          <input
-            id="ara"
-            className="search"
-            placeholder="Postada ara  ( / )"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <label className="search-sarmal">
+            <svg className="search-ikon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="M20 20l-3.5-3.5" />
+            </svg>
+            <input
+              id="ara"
+              className="search"
+              placeholder="Postada ara  ( / )"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
           {query && (
             <button className="icon-btn" onClick={() => setQuery("")} title="Aramayı temizle">
               ✕
             </button>
           )}
-          <button className="icon-btn" onClick={yukle} title="Yenile (r)" disabled={loading}>
-            ↻
+          <button
+            className={`icon-btn yenile ${loading ? "is-donuyor" : ""}`}
+            onClick={yukle}
+            title="Yenile (r)"
+            aria-label="Yenile"
+            disabled={loading}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+              <path d="M20 4v7h-7" />
+            </svg>
           </button>
 
           {/* Spam'i boşalt — yalnızca Spam klasöründe ve doluyken.
@@ -652,14 +673,31 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
         </div>
 
+        {/* İnce yükleme çizgisi — liste doluyken metin yerine bu */}
+        <div className={`yukleme-cizgi ${yukleniyor ? "is-aktif" : ""}`} aria-hidden="true" />
+
         {error && <p className="empty">{error}</p>}
-        {!error && yukleniyor && (
-          <p className="empty">{araniyor ? "Aranıyor…" : "Yükleniyor…"}</p>
+        {!error && yukleniyor && gosterilen.length === 0 && (
+          <div className="iskelet-liste" aria-label={araniyor ? "Aranıyor…" : "Yükleniyor…"}>
+            {Array.from({ length: 7 }, (_, i) => (
+              <div key={i} className="iskelet-satir" style={{ "--i": i } as CSSProperties}>
+                <span className="iskelet iskelet-avatar" />
+                <div className="iskelet-govde">
+                  <span className="iskelet iskelet-cizgi" style={{ width: "42%" }} />
+                  <span className="iskelet iskelet-cizgi" style={{ width: "78%" }} />
+                  <span className="iskelet iskelet-cizgi soluk" style={{ width: "92%" }} />
+                </div>
+              </div>
+            ))}
+          </div>
         )}
         {!error && !yukleniyor && gosterilen.length === 0 && (
-          <p className="empty">
-            {query.trim() ? `"${query.trim()}" için sonuç yok.` : "Bu klasör boş."}
-          </p>
+          <div className="bos-durum">
+            <div className="bos-ikon" aria-hidden="true">
+              {query.trim() ? "🔍" : "📭"}
+            </div>
+            <p>{query.trim() ? `"${query.trim()}" için sonuç yok.` : "Bu klasör boş."}</p>
+          </div>
         )}
         {!error && !yukleniyor && sonuclar && sonuclar.length > 0 && (
           <p className="search-note">{sonuclar.length} sonuç · tüm klasör tarandı</p>
@@ -674,8 +712,6 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 olabilir — Spam klasörüne bakıp "Spam değil" diyebilirsin.{" "}
               </>
             )}
-
-        {bilgi && <p className="search-note">{bilgi}</p>}
             {bakim.temizlenen > 0 && (
               <>{bakim.temizlenen} eski spam Çöp'e taşındı.</>
             )}
@@ -743,9 +779,11 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
         )}
 
         <div className="rows">
-          {gosterilen.map((m) => (
+          {gosterilen.map((m, i) => (
             <button
               key={m.uid}
+              // Giriş animasyonu sırayla — ilk 16 satırdan sonrası beklemesin
+              style={{ "--i": Math.min(i, 16) } as CSSProperties}
               className={
                 `row ${m.seen ? "" : "is-unread"} ` +
                 `${selected === m.uid ? "is-selected" : ""} ` +
@@ -858,8 +896,10 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <section className={`pane ${tamEkran ? "is-tam-ekran" : ""}`}>
         {selected === null ? (
           <div className="pane-empty">
-            <Logo size={44} muted />
-            <p>Okumak için bir mesaj seç.</p>
+            <div className="pane-empty-logo">
+              <Logo size={64} />
+            </div>
+            <p className="pane-empty-baslik">Okumak için bir mesaj seç.</p>
             <p className="hint">
               <kbd>c</kbd> yaz · <kbd>r</kbd> yenile · <kbd>/</kbd> ara · <kbd>Esc</kbd> kapat
             </p>
@@ -913,6 +953,14 @@ export function Mail({ me, onLogout }: { me: Me; onLogout: () => void }) {
         </svg>
         Yaz
       </button>
+
+      {/* Kısa bilgi — alttan kayan bildirim; key ile her mesajda yeniden oynar */}
+      {bilgi && (
+        <div key={bilgi} className="toast" role="status">
+          <span className="toast-ikon" aria-hidden="true">✓</span>
+          {bilgi}
+        </div>
+      )}
 
       {ayarlar && (
         <Settings
