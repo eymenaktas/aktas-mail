@@ -68,9 +68,24 @@
 }
 .login-hero li b { font-weight: 600; }
 .login-hero li span { font-size: 14px; opacity: 0.8; }
+.login-hero::after {
+  content: "";
+  position: absolute;
+  right: -120px;
+  bottom: -120px;
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 0 0 60px rgba(255, 255, 255, 0.04), 0 0 0 120px rgba(255, 255, 255, 0.03);
+  pointer-events: none;
+}
 @media (max-width: 860px) {
-  .login { grid-template-columns: 1fr; }
-  .login-hero { display: none; }
+  .login { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  /* Dar ekranda panel kısa bir bant olarak kalıyor; özellik listesi gizleniyor. */
+  .login-hero { padding: 40px 24px 32px; gap: 8px; }
+  .login-hero h2 { font-size: 28px; margin-top: 8px; }
+  .login-hero ul { display: none; }
 }
 .login-studio {
   display: inline-flex;
