@@ -74,7 +74,7 @@ Türkçe maillerin `ISO-8859-9` kodlaması da böylece çalıştı.
 
 ## Spam sınıflandırma
 
-Model ayrı depoda: **[turkce-spam-modeli](https://github.com/eymenaktas/turkce-spam-modeli)**
+Model ayrı depoda: **[turkce-spam-modeli](https://github.com/Akts-Studio/turkce-spam-modeli)**
 — %97 doğruluk, ONNX, kendi gelen kutusu verisiyle eğitildi.
 
 Üç kademeli davranış:
