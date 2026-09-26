@@ -308,7 +308,7 @@ curl -s -X POST http://127.0.0.1:3001/api/auth/login \
 ```bash
 cd backend && npm run build && cd ../frontend && npm run build && cd ..
 rsync -a --delete backend/dist/ akts:/opt/aktas-mail/backend/dist/
-rsync -a --delete frontend/dist/ akts:/opt/aktas-mail/frontend/
+rsync -a --delete frontend/dist/ akts:/opt/aktas-mail/frontend/dist/
 ssh akts 'pm2 restart aktas-mail'
 ```
 
