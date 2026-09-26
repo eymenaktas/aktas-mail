@@ -217,6 +217,10 @@ export function Login({ onDone, onCancel }: { onDone: () => void; onCancel?: () 
           </button>
         )}
       </div>
+      <a className="login-studio" href="https://akts.tr">
+        <img src="https://akts.tr/brand/akts-studio.svg" alt="" width="16" height="16" />
+        Akts Studio
+      </a>
     </div>
   );
 }

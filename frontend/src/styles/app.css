@@ -20,9 +20,22 @@
   height: 100%;
   display: grid;
   place-items: center;
+  align-content: center;
   padding: 24px;
   background: var(--surface);
 }
+.login-studio {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 20px;
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.login-studio:hover { color: inherit; }
+.login-studio img { border-radius: 4px; }
+
 .login-card {
   width: 100%;
   max-width: 400px;
