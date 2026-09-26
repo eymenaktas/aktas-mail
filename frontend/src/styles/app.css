@@ -19,10 +19,58 @@
 .login {
   height: 100%;
   display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  background: var(--surface);
+}
+.login-side {
+  display: grid;
   place-items: center;
   align-content: center;
   padding: 24px;
-  background: var(--surface);
+}
+/* Sol panel: ürünü anlatan mavi alan. Dar ekranda gizleniyor, form öne çıkıyor. */
+.login-hero {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+  padding: 64px clamp(32px, 6vw, 88px);
+  color: #fff;
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(255, 255, 255, 0.18), transparent 60%),
+    linear-gradient(160deg, #1a73e8 0%, #1557b0 60%, #0b3d91 100%);
+}
+.login-hero h2 {
+  font-size: clamp(32px, 3.6vw, 48px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  margin-top: 16px;
+}
+.login-hero > p {
+  font-size: 17px;
+  opacity: 0.85;
+}
+.login-hero ul {
+  list-style: none;
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+  max-width: 420px;
+}
+.login-hero li {
+  display: grid;
+  gap: 2px;
+  padding-left: 20px;
+  border-left: 2px solid rgba(255, 255, 255, 0.35);
+}
+.login-hero li b { font-weight: 600; }
+.login-hero li span { font-size: 14px; opacity: 0.8; }
+@media (max-width: 860px) {
+  .login { grid-template-columns: 1fr; }
+  .login-hero { display: none; }
 }
 .login-studio {
   display: inline-flex;

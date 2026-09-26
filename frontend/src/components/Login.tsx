@@ -114,6 +114,18 @@ export function Login({ onDone, onCancel }: { onDone: () => void; onCancel?: () 
 
   return (
     <div className="login">
+      <aside className="login-hero" aria-hidden={!!onCancel}>
+        <Logo size={56} />
+        <h2>akts.tr posta kutun</h2>
+        <p>Kendi sunucusunda çalışan, sade bir e-posta.</p>
+        <ul>
+          <li><b>Passkey ile giriş</b><span>Parola yok; parmak izi ya da yüz tanıma yeter.</span></li>
+          <li><b>Kendi sunucusunda</b><span>Postfix ve Dovecot, üçüncü parti yok.</span></li>
+          <li><b>Türkçe spam modeli</b><span>Gelen kutusu kendi eğittiğimiz modelle süzülüyor.</span></li>
+          <li><b>Güvenli okuyucu</b><span>Gelen HTML yalıtılmış çerçevede açılıyor.</span></li>
+        </ul>
+      </aside>
+      <div className="login-side">
       <div className="login-card">
         <div className="login-top">
           <Logo size={44} />
@@ -221,6 +233,7 @@ export function Login({ onDone, onCancel }: { onDone: () => void; onCancel?: () 
         <img src="https://akts.tr/brand/akts-studio.svg" alt="" width="16" height="16" />
         Akts Studio
       </a>
+      </div>
     </div>
   );
 }
